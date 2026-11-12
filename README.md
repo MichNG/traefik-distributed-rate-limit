@@ -26,8 +26,14 @@ experimental:
   plugins:
     distributedRateLimit:
       moduleName: "github.com/MichNG/traefik-distributed-rate-limit"
-      version: "v2.0.1"
+      version: "v1.0.1"
 ```
+
+> **Versioning.** The module path carries no `/v2` suffix, so the Go module rules
+> allow only `v0.x` and `v1.x` tags: a `v2.x` tag is rejected by the module proxy
+> (`module path must match major version`), the Traefik plugin catalog never sees
+> it, and `version: "v2.x.y"` cannot be installed. Breaking changes therefore stay
+> inside the `v1.x` line, or need the module path to be renamed to `.../v2`.
 
 For local development, mount the plugin directory and use `localPlugins`:
 

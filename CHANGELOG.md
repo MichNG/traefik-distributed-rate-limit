@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.1 (2026-11-12)
+## 1.0.1 (2026-11-12)
 
 ### Fixed
 
@@ -19,7 +19,7 @@
 * `docker-compose.acl.yaml` (`make integration-acl`): a Sentinels + Redis ACL
   stand, with and without `store.redis.username`.
 
-## 2.0.0
+## 1.0.0
 
 Initial release of `traefik-distributed-rate-limit`, a standalone Traefik
 middleware plugin.
