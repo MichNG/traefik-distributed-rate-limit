@@ -352,7 +352,7 @@ func (c *Client) handshake(rc *respConn) error {
 			return err
 		}
 		if reply.isError() {
-			return fmt.Errorf("authenticating against Redis: %w", reply)
+			return redisError("authenticating against Redis", reply)
 		}
 	}
 
@@ -361,7 +361,7 @@ func (c *Client) handshake(rc *respConn) error {
 		return err
 	}
 	if reply.isError() {
-		return fmt.Errorf("selecting database %d: %w", c.cfg.Database, reply)
+		return redisError(fmt.Sprintf("selecting database %d", c.cfg.Database), reply)
 	}
 
 	return nil
@@ -550,7 +550,7 @@ func (s *Script) ensureLoaded(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("loading script: %w", err)
 	}
 	if reply.isError() {
-		return "", fmt.Errorf("loading script: %w", reply)
+		return "", redisError("loading script", reply)
 	}
 
 	sha = reply.String()

@@ -294,7 +294,7 @@ func (r *SentinelResolver) authenticate(rc *respConn) error {
 		return err
 	}
 	if reply.isError() {
-		return fmt.Errorf("Sentinel authentication failed: %w", reply)
+		return redisError("Sentinel authentication failed", reply)
 	}
 
 	return nil
@@ -310,7 +310,7 @@ func (r *SentinelResolver) sendAndReadMaster(rc *respConn) (string, error) {
 		return "", err
 	}
 	if reply.isError() {
-		return "", fmt.Errorf("SENTINEL get-master-addr-by-name: %w", reply)
+		return "", redisError("SENTINEL get-master-addr-by-name", reply)
 	}
 
 	return parseMasterAddr(reply, r.cfg.MasterSet)
@@ -473,7 +473,7 @@ func (r *SentinelResolver) watchOnce(ctx context.Context) error {
 		}
 		if reply.isError() {
 			rc.close()
-			lastErr = fmt.Errorf("SUBSCRIBE: %w", reply)
+			lastErr = redisError("SUBSCRIBE", reply)
 			continue
 		}
 

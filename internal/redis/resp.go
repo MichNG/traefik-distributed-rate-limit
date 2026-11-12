@@ -162,6 +162,17 @@ func readValue(r *bufio.Reader) (respValue, error) {
 	}
 }
 
+// redisError formats a RESP error reply.
+//
+// The reply is a *concrete* interpreted type: passing it to %w through yaegi's
+// fmt wrapper renders "%!w(stdlib._fmt_Stringer=...)" instead of the server
+// message (a RESP error value is exposed to the compiled fmt as a fmt.Stringer).
+// The text is therefore taken explicitly, so that operators see the real reason
+// (for instance "WRONGPASS invalid username-password pair").
+func redisError(prefix string, reply respValue) error {
+	return fmt.Errorf("%s: %s", prefix, reply.Error())
+}
+
 // respConn is a connection plus its buffered reader. Keeping one reader per
 // connection is mandatory: on a pub/sub connection, push messages may arrive
 // in the same TCP segment as the SUBSCRIBE confirmation, and a per-call reader

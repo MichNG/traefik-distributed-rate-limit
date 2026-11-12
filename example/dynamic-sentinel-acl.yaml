@@ -1,0 +1,95 @@
+# dynamic-sentinel-acl.yaml
+#
+# Redis Sentinel with ACL authentication:
+#
+#   /        store.redis.username is set  -> the plugin authenticates as the ACL user
+#   /nouser  store.redis.username is NOT set -> AUTH with the default user only,
+#            which the ACL-protected master rejects (the log shows WRONGPASS)
+#
+# In both cases the Sentinels are protected by their own credentials
+# (store.redis.sentinel.username/password).
+http:
+  routers:
+    with-user:
+      rule: "Host(`localhost`) && PathPrefix(`/`)"
+      entryPoints: [web]
+      middlewares: [rl-with-user]
+      service: target
+    without-user:
+      rule: "Host(`localhost`) && PathPrefix(`/nouser`)"
+      entryPoints: [web]
+      middlewares: [rl-without-user]
+      service: target
+    without-user-strict:
+      rule: "Host(`localhost`) && PathPrefix(`/nouser-strict`)"
+      entryPoints: [web]
+      middlewares: [rl-without-user-strict]
+      service: target
+
+  middlewares:
+    rl-with-user:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          burst: 2
+          period: 1s
+          denyOnError: false
+          responseHeaders: true
+          sourceCriterion:
+            requestHeaderName: X-Sm-User-Id
+          store:
+            redis:
+              endpoints: [sentinel-0:26379, sentinel-1:26379, sentinel-2:26379]
+              username: app           # data plane (master) ACL user
+              password: apppass
+              sentinel:
+                masterSet: mymaster
+                watch: true
+                username: sentineluser # sentinel credentials (different pair)
+                password: sentinelpass
+
+    rl-without-user:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          burst: 2
+          period: 1s
+          denyOnError: false
+          sourceCriterion:
+            requestHeaderName: X-Sm-User-Id
+          store:
+            redis:
+              endpoints: [sentinel-0:26379, sentinel-1:26379, sentinel-2:26379]
+              password: apppass       # password only: AUTH <password>, no ACL user
+              sentinel:
+                masterSet: mymaster
+                watch: true
+                username: sentineluser
+                password: sentinelpass
+
+    # Same broken credentials, but denyOnError=true: the request is rejected
+    # with 429 instead of silently bypassing the limiter.
+    rl-without-user-strict:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          burst: 2
+          period: 1s
+          denyOnError: true
+          sourceCriterion:
+            requestHeaderName: X-Sm-User-Id
+          store:
+            redis:
+              endpoints: [sentinel-0:26379, sentinel-1:26379, sentinel-2:26379]
+              password: apppass
+              sentinel:
+                masterSet: mymaster
+                watch: true
+                username: sentineluser
+                password: sentinelpass
+
+  services:
+    target:
+      loadBalancer:
+        servers:
+          - url: http://target

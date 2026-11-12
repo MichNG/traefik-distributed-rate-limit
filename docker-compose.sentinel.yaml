@@ -1,6 +1,11 @@
 # Redis Sentinel topology used by the integration tests:
 #   redis-master + redis-replica + 3 Sentinels (quorum 2) + Traefik + backend.
 #
+# The Redis and Sentinel ports can be moved, which is useful when the default
+# ones are already taken (or to prove that nothing is hardcoded):
+#   REDIS_PORT=16379 docker compose -f docker-compose.sentinel.yaml up -d
+#   curl localhost:${HTTP_PORT:-8000}/
+#
 # Try a failover while sending traffic:
 #   docker compose -f docker-compose.sentinel.yaml exec sentinel-0 \
 #     redis-cli -p 26379 SENTINEL failover mymaster
@@ -18,17 +23,24 @@ x-sentinel-common: &sentinel-common
   restart: on-failure:10
 
 x-sentinel-command: &sentinel-command >-
-  sh -c "printf 'port 26379\nsentinel resolve-hostnames yes\nsentinel announce-hostnames yes\nsentinel monitor mymaster redis-master 6379 2\nsentinel down-after-milliseconds mymaster 5000\nsentinel failover-timeout mymaster 10000\n' > /tmp/sentinel.conf && redis-sentinel /tmp/sentinel.conf"
+  sh -c "printf 'port 26379\nsentinel resolve-hostnames yes\nsentinel announce-hostnames yes\nsentinel monitor mymaster redis-master ${REDIS_PORT:-6379} 2\nsentinel down-after-milliseconds mymaster 5000\nsentinel failover-timeout mymaster 10000\n' > /tmp/sentinel.conf && redis-sentinel /tmp/sentinel.conf"
 
 services:
   redis-master:
     image: redis:7
+    command: ["redis-server", "--port", "${REDIS_PORT:-6379}"]
     ports:
-      - 6379:6379
+      - "${REDIS_PORT:-6379}:${REDIS_PORT:-6379}"
 
   redis-replica:
     image: redis:7
-    command: ["redis-server", "--replicaof", "redis-master", "6379"]
+    command:
+      - redis-server
+      - --port
+      - "${REDIS_PORT:-6379}"
+      - --replicaof
+      - redis-master
+      - "${REDIS_PORT:-6379}"
     depends_on:
       - redis-master
 
@@ -36,7 +48,7 @@ services:
     <<: *sentinel-common
     command: *sentinel-command
     ports:
-      - 26379:26379
+      - "${SENTINEL_PORT:-26379}:26379"
 
   sentinel-1:
     <<: *sentinel-common
@@ -50,8 +62,8 @@ services:
     image: traefik:v3.5
     command: --api.insecure=true --api.debug=true --providers.file.filename=/etc/traefik/dynamic-sentinel.yaml
     ports:
-      - "8000:8000"
-      - "8080:8080"
+      - "${HTTP_PORT:-8000}:8000"
+      - "${API_PORT:-8080}:8080"
     volumes:
       - ./example/traefik-sentinel.yaml:/etc/traefik/traefik.yaml:ro
       - ./example/dynamic-sentinel.yaml:/etc/traefik/dynamic-sentinel.yaml:ro

@@ -1,0 +1,69 @@
+# Redis Sentinel topology with ACL authentication, mirroring a production setup:
+#   * the Redis master/replica require an ACL user (app/apppass);
+#   * the Sentinels require their own credentials (sentineluser/sentinelpass)
+#     and authenticate to the master with the ACL user.
+#
+# It reproduces the two independent credential pairs of the plugin:
+#   store.redis.username/password          -> master
+#   store.redis.sentinel.username/password -> sentinels
+#
+#   REDIS_PORT=16379 docker compose -f docker-compose.acl.yaml up -d
+services:
+  redis-master:
+    image: redis:7
+    command: >-
+      sh -c "printf 'port ${REDIS_PORT:-6379}\nuser default off\nuser app on >apppass ~* +@all\n'
+      > /tmp/redis.conf && redis-server /tmp/redis.conf"
+    ports:
+      - "${REDIS_PORT:-6379}:${REDIS_PORT:-6379}"
+
+  redis-replica:
+    image: redis:7
+    command: >-
+      sh -c "printf 'port ${REDIS_PORT:-6379}\nmasteruser app\nmasterauth apppass\nuser default off\nuser app on >apppass ~* +@all\n'
+      > /tmp/redis.conf && redis-server /tmp/redis.conf --replicaof redis-master ${REDIS_PORT:-6379}"
+    depends_on:
+      - redis-master
+
+  sentinel-0:
+    image: redis:7
+    depends_on: [redis-master, redis-replica]
+    restart: on-failure:10
+    command: >-
+      sh -c "printf 'port 26379\nrequirepass sentinelpass\nuser sentineluser on >sentinelpass ~* +@all\nsentinel resolve-hostnames yes\nsentinel announce-hostnames yes\nsentinel auth-user mymaster app\nsentinel auth-pass mymaster apppass\nsentinel monitor mymaster redis-master ${REDIS_PORT:-6379} 2\nsentinel down-after-milliseconds mymaster 5000\nsentinel failover-timeout mymaster 10000\n'
+      > /tmp/sentinel.conf && redis-sentinel /tmp/sentinel.conf"
+    ports:
+      - "${SENTINEL_PORT:-26379}:26379"
+
+  sentinel-1:
+    image: redis:7
+    depends_on: [redis-master, redis-replica]
+    restart: on-failure:10
+    command: >-
+      sh -c "printf 'port 26379\nrequirepass sentinelpass\nuser sentineluser on >sentinelpass ~* +@all\nsentinel resolve-hostnames yes\nsentinel announce-hostnames yes\nsentinel auth-user mymaster app\nsentinel auth-pass mymaster apppass\nsentinel monitor mymaster redis-master ${REDIS_PORT:-6379} 2\nsentinel down-after-milliseconds mymaster 5000\nsentinel failover-timeout mymaster 10000\n'
+      > /tmp/sentinel.conf && redis-sentinel /tmp/sentinel.conf"
+
+  sentinel-2:
+    image: redis:7
+    depends_on: [redis-master, redis-replica]
+    restart: on-failure:10
+    command: >-
+      sh -c "printf 'port 26379\nrequirepass sentinelpass\nuser sentineluser on >sentinelpass ~* +@all\nsentinel resolve-hostnames yes\nsentinel announce-hostnames yes\nsentinel auth-user mymaster app\nsentinel auth-pass mymaster apppass\nsentinel monitor mymaster redis-master ${REDIS_PORT:-6379} 2\nsentinel down-after-milliseconds mymaster 5000\nsentinel failover-timeout mymaster 10000\n'
+      > /tmp/sentinel.conf && redis-sentinel /tmp/sentinel.conf"
+
+  reverse-proxy:
+    image: traefik:v3.5
+    command: --api.insecure=true --providers.file.filename=/etc/traefik/dynamic-sentinel-acl.yaml
+    ports:
+      - "${HTTP_PORT:-8000}:8000"
+      - "${API_PORT:-8080}:8080"
+    volumes:
+      - ./example/traefik-acl.yaml:/etc/traefik/traefik.yaml:ro
+      - ./example/dynamic-sentinel-acl.yaml:/etc/traefik/dynamic-sentinel-acl.yaml:ro
+      - .:/plugins-local/src/github.com/MichNG/traefik-distributed-rate-limit/
+    depends_on: [sentinel-0, sentinel-1, sentinel-2]
+
+  target:
+    image: traefik/whoami
+    ports:
+      - "80"

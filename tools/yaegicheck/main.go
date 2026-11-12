@@ -14,6 +14,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/sha1"
 	"encoding/hex"
@@ -126,6 +127,95 @@ func main() {
 	checkLifecycle(i, newFn)
 	checkCookieSource(i, newFn)
 	checkConfigurationErrors(i, newFn)
+	checkReadableStoreErrors(gopath)
+}
+
+// newInterpreter loads the plugin package with the same interpreter options
+// Traefik uses. stdout/stderr receive the plugin log lines.
+func newInterpreter(gopath string, stdout, stderr io.Writer) *interp.Interpreter {
+	i := interp.New(interp.Options{GoPath: gopath, Env: os.Environ(), Stdout: stdout, Stderr: stderr})
+	if err := i.Use(stdlib.Symbols); err != nil {
+		fail("loading the stdlib symbols: %v", err)
+	}
+
+	if _, err := i.Eval(fmt.Sprintf("import %q", pluginImport)); err != nil {
+		fail("the plugin does not compile under yaegi: %v", err)
+	}
+
+	return i
+}
+
+// checkReadableStoreErrors makes sure a store error keeps its message when it
+// crosses the interpreter boundary: a RESP error is a concrete interpreted
+// type, and passing it to %w through yaegi renders "%!w(stdlib._fmt_Stringer=)"
+// instead of the reason (here: an AUTH failure, the most common production
+// misconfiguration).
+func checkReadableStoreErrors(gopath string) {
+	fmt.Println("=== store errors must keep their message (AUTH failure) ===")
+
+	addr, stopServer, counters, reset := newMockServer()
+	defer stopServer()
+	reset()
+	counters.authError.Store("WRONGPASS invalid username-password pair or user is disabled.")
+
+	var captured bytes.Buffer
+	i := newInterpreter(gopath, io.MultiWriter(os.Stdout, &captured), io.MultiWriter(os.Stderr, &captured))
+
+	newFn, err := i.Eval("traefik_distributed_rate_limit.New")
+	if err != nil {
+		fail("looking up New: %v", err)
+	}
+
+	cfg, err := i.Eval("traefik_distributed_rate_limit.CreateConfig()")
+	if err != nil {
+		fail("CreateConfig: %v", err)
+	}
+
+	value := cfg.Elem()
+	value.FieldByName("Limit").SetInt(3)
+	value.FieldByName("Burst").SetInt(5)
+	value.FieldByName("Period").SetString("1s")
+
+	deny := reflect.New(value.FieldByName("DenyOnError").Type().Elem())
+	deny.Elem().SetBool(true)
+	value.FieldByName("DenyOnError").Set(deny)
+
+	redisCfg := value.FieldByName("Store").FieldByName("Redis")
+	redisCfg.FieldByName("Endpoints").Set(reflect.ValueOf([]string{addr}))
+	redisCfg.FieldByName("Username").SetString("app")
+	redisCfg.FieldByName("Password").SetString("wrong")
+	redisCfg.FieldByName("Timeout").SetString("2s")
+
+	next := http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) { rw.WriteHeader(http.StatusOK) })
+
+	results := newFn.Call([]reflect.Value{
+		reflect.ValueOf(context.Background()),
+		reflect.ValueOf(next),
+		cfg,
+		reflect.ValueOf("yaegicheck-auth"),
+	})
+	if len(results) < 1 || results[0].IsNil() {
+		fail("New returned no handler (error: %v)", results[1].Interface())
+	}
+
+	rec := httptest.NewRecorder()
+	callHandler(results[0], rec)
+
+	if rec.Code != http.StatusTooManyRequests {
+		fail("status = %d, want 429 (denyOnError=true and no store decision)", rec.Code)
+	}
+
+	logs := captured.String()
+	flat := strings.ReplaceAll(logs, "\n", " | ")
+
+	if !strings.Contains(logs, "WRONGPASS invalid username-password pair") {
+		fail("the store error message was lost under yaegi; captured log: %s", flat)
+	}
+	if strings.Contains(logs, "%!") {
+		fail("the store error was rendered with a fmt marker under yaegi; captured log: %s", flat)
+	}
+
+	fmt.Println("OK: the store error (AUTH failure) is readable under yaegi")
 }
 
 // checkConfigurationErrors makes sure that an invalid configuration is rejected
@@ -478,6 +568,8 @@ func startMockRedis() (string, func()) {
 type mockCounters struct {
 	evaluated   atomic.Int64
 	subscribers atomic.Int64
+	// authError, when not empty, is returned for AUTH commands.
+	authError atomic.Value
 }
 
 func (c *mockCounters) reset() { c.evaluated.Store(0) }
@@ -526,7 +618,13 @@ func serveMock(conn net.Conn, addr string, counters *mockCounters) {
 		switch strings.ToUpper(args[0]) {
 		case "PING":
 			_, _ = io.WriteString(conn, "+PONG\r\n")
-		case "AUTH", "SELECT":
+		case "AUTH":
+			if msg, _ := counters.authError.Load().(string); msg != "" {
+				_, _ = io.WriteString(conn, "-"+msg+"\r\n")
+				continue
+			}
+			_, _ = io.WriteString(conn, "+OK\r\n")
+		case "SELECT":
 			_, _ = io.WriteString(conn, "+OK\r\n")
 		case "SENTINEL":
 			// The stub plays both roles: it reports itself as the master.

@@ -29,6 +29,9 @@ type fakeServer struct {
 	delay time.Duration
 	// closeAfter closes the connection after this many commands (0 = never).
 	closeAfter int64
+	// authError, when set, is returned for AUTH commands (simulates a bad
+	// credential or a missing ACL username).
+	authError string
 
 	mu            sync.Mutex
 	perConn       map[net.Conn]int64
@@ -127,8 +130,11 @@ func (f *fakeServer) handle(conn net.Conn) {
 			return // simulate a node that drops the connection
 		}
 
-		switch strings.ToUpper(args[0]) {
-		case "PING":
+		name := strings.ToUpper(args[0])
+		switch {
+		case name == "AUTH" && f.authError != "":
+			_ = writeRaw(conn, "-"+f.authError+"\r\n")
+		case name == "PING":
 			_ = writeRaw(conn, "+PONG\r\n")
 		default:
 			_ = writeRaw(conn, "+OK\r\n")
@@ -475,5 +481,45 @@ func TestSentinelWatcherSurvivesPanic(t *testing.T) {
 
 	if _, gen := resolver.MasterGeneration(); gen != 1 {
 		t.Fatalf("generation = %d, want 1", gen)
+	}
+}
+
+// The error of an AUTH failure must carry the server message: a RESP error is a
+// concrete interpreted type, and passing it to %w through yaegi's fmt wrapper
+// renders "%!w(stdlib._fmt_Stringer=...)" instead of the reason.
+func TestAuthenticationErrorIsReadable(t *testing.T) {
+	server := newFakeServer(t, 0)
+	server.authError = "WRONGPASS invalid username-password pair or user is disabled."
+
+	provider, err := NewStaticProvider([]string{server.addr()}, 0)
+	if err != nil {
+		t.Fatalf("NewStaticProvider: %v", err)
+	}
+
+	client, err := NewClient(context.Background(), ClientConfig{
+		Username:       "app",
+		Password:       "wrong",
+		ConnectTimeout: time.Second,
+		CommandTimeout: time.Second,
+	}, nil, provider, testLoggerRef())
+	if err != nil {
+		t.Fatalf("NewClient: %v", err)
+	}
+	defer client.Close()
+
+	err = client.Ping(context.Background())
+	if err == nil {
+		t.Fatal("expected the authentication to fail")
+	}
+
+	message := err.Error()
+	if !strings.Contains(message, "WRONGPASS invalid username-password pair") {
+		t.Fatalf("error = %q, want it to carry the server message", message)
+	}
+	if strings.Contains(message, "%!") {
+		t.Fatalf("error = %q, want a readable message (no fmt markers)", message)
+	}
+	if !strings.Contains(message, "authenticating against Redis") {
+		t.Fatalf("error = %q, want the authentication context", message)
 	}
 }

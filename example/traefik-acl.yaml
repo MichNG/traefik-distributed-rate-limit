@@ -1,0 +1,21 @@
+# traefik-acl.yaml - static configuration for docker-compose.acl.yaml
+entryPoints:
+  web:
+    address: ":8000"
+
+providers:
+  file:
+    filename: "/etc/traefik/dynamic-sentinel-acl.yaml"
+
+api:
+  dashboard: true
+  insecure: true
+
+log:
+  level: DEBUG
+  format: common
+
+experimental:
+  localPlugins:
+    distributedRateLimit:
+      moduleName: github.com/MichNG/traefik-distributed-rate-limit

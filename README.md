@@ -208,6 +208,54 @@ appear in the Traefik log at **debug** level: set `log.level: DEBUG` to see them
 (`[distributed-ratelimit <middleware>] ERROR ...`). Messages are throttled to one
 occurrence per template per 5 seconds.
 
+## Troubleshooting
+
+### The limiter silently stops working
+
+With `denyOnError: false`, a request whose rate limit decision cannot be obtained
+reaches the backend, and the middleware logs the reason at error level:
+
+```
+[distributed-ratelimit my-middleware@file] ERROR no rate limit decision from the
+store on node "redis-master:6379": ... authenticating against Redis: WRONGPASS
+invalid username-password pair or user is disabled.
+```
+
+The usual causes:
+
+| In the log | Cause | Fix |
+| :--- | :--- | :--- |
+| `WRONGPASS ...` while the log node is the **master** | `store.redis.username` is missing while the Redis ACL requires a username: the plugin sends `AUTH <password>` (the `default` user) | set `store.redis.username` (keep `store.redis.password`) |
+| `WRONGPASS ...` on a **Sentinel** node | `store.redis.sentinel.username` / `password` are missing or wrong | set them: they may differ from the data-plane pair |
+| `NOAUTH Authentication required.` | the password is missing for that endpoint class | set the corresponding credentials |
+| `TLS handshake with ...` | CA/cert/key or `insecureSkipVerify` | check `store.redis.tls.*` (a file path **or** inline PEM; `cert` and `key` must be set together) |
+| `rate limit: no decision from the store` **without** a cause | the circuit breaker is open after `store.redis.breaker.threshold` consecutive failures | fix the root cause; the breaker closes after `.reattempt`, or on the first successful command |
+
+With `denyOnError: true` the same failures are visible to the clients as `429`
+(with `Retry-After`) instead of being silently passed through, which is usually
+the better default for a rate limiter.
+
+Two credential pairs are independent:
+
+```yaml
+store:
+  redis:
+    username: app             # AUTH app <password> against the master
+    password: apppass
+    sentinel:
+      username: sentineluser  # AUTH sentineluser <password> against the Sentinels
+      password: sentinelpass
+```
+
+**The address in the log is the master as reported by Sentinel**, and it may use a
+different port than the Sentinel endpoints: with
+`endpoints: ["sentinel-host:16379"]` and a Redis listening on `6379`, the log
+legitimately shows `sentinel-host:6379`. The port always comes from
+`SENTINEL get-master-addr-by-name`, never from the `endpoints` list.
+
+A stand reproducing the ACL case (master behind an ACL user, Sentinels behind
+their own credentials) is `docker-compose.acl.yaml` (`make integration-acl`).
+
 ## Credits
 
 * The source-strategy helpers (`internal/ip`, `internal/utils`) are derived from
@@ -255,7 +303,9 @@ exactly the decoder that Traefik's plugin loader applies to the configuration.
 
 Examples (`example/`): `dynamic.yaml` (client IP), `dynamic-header.yaml`
 (header), `dynamic-sentinel.yaml` (Sentinel), `dynamic-cookie.yaml` (cookie and
-header sources, with every `onEmptySource` policy).
+header sources, with every `onEmptySource` policy),
+`dynamic-sentinel-acl.yaml` (Sentinel + Redis ACL, with and without
+`store.redis.username`).
 
 ```bash
 ./run-tests.sh -race      # gofmt + go vet + go test (works inside restricted sandboxes)

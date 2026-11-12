@@ -1,4 +1,4 @@
-.PHONY: test test-race cover lint yaegi-check integration integration-sentinel integration-cookie
+.PHONY: test test-race cover lint yaegi-check integration integration-sentinel integration-cookie integration-acl
 
 # Runs gofmt, go vet and the whole test suite. The Go caches are kept inside
 # the repository so that the target also works in restricted environments.
@@ -25,3 +25,7 @@ integration-sentinel:
 
 integration-cookie:
 	@docker compose -f docker-compose.cookie.yaml up -d
+
+# Redis Sentinel behind an ACL user, with separate Sentinel credentials.
+integration-acl:
+	@docker compose -f docker-compose.acl.yaml up -d

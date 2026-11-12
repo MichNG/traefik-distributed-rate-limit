@@ -1,5 +1,24 @@
 # Changelog
 
+## 2.0.1 (unreleased)
+
+### Fixed
+
+* store errors keep their message when they cross the Yaegi boundary: a RESP
+  error reply is a concrete interpreted type, and wrapping it with `%w` rendered
+  `%!w(stdlib._fmt_Stringer=...)` instead of the server text. An authentication
+  failure is now reported as
+  `authenticating against Redis: WRONGPASS invalid username-password pair or user is disabled.`,
+  for the data plane and for the Sentinels (`make yaegi-check` guards this).
+
+### Added
+
+* troubleshooting section in the README: credential pairs, readable store
+  errors, and why the master reported by Sentinel can use a different port than
+  the sentinel endpoints;
+* `docker-compose.acl.yaml` (`make integration-acl`): a Sentinels + Redis ACL
+  stand, with and without `store.redis.username`.
+
 ## 2.0.0
 
 Initial release of `traefik-distributed-rate-limit`, a standalone Traefik
