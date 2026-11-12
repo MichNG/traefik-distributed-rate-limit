@@ -1,0 +1,26 @@
+# traefik.yaml
+#
+# Static configuration used by docker-compose.yaml: the plugin is mounted as a
+# local plugin (see the volume in docker-compose.yaml) under the name
+# distributedRateLimit.
+
+entryPoints:
+  web:
+    address: ":8000"
+
+providers:
+  file:
+    filename: "/etc/traefik/dynamic.yaml"
+
+api:
+  dashboard: true
+  insecure: true  # development only
+
+log:
+  level: INFO
+  format: common
+
+experimental:
+  localPlugins:
+    distributedRateLimit:
+      moduleName: github.com/MichNG/traefik-distributed-rate-limit

@@ -1,0 +1,67 @@
+# Redis Sentinel topology used by the integration tests:
+#   redis-master + redis-replica + 3 Sentinels (quorum 2) + Traefik + backend.
+#
+# Try a failover while sending traffic:
+#   docker compose -f docker-compose.sentinel.yaml exec sentinel-0 \
+#     redis-cli -p 26379 SENTINEL failover mymaster
+#
+# The rate limiter must keep answering (no 5xx) and keep enforcing the limit on
+# the new master.
+
+x-sentinel-common: &sentinel-common
+  image: redis:7
+  depends_on:
+    - redis-master
+    - redis-replica
+  # Sentinel resolves the master hostname when the configuration is read: the
+  # container must retry until the Docker DNS record exists.
+  restart: on-failure:10
+
+x-sentinel-command: &sentinel-command >-
+  sh -c "printf 'port 26379\nsentinel resolve-hostnames yes\nsentinel announce-hostnames yes\nsentinel monitor mymaster redis-master 6379 2\nsentinel down-after-milliseconds mymaster 5000\nsentinel failover-timeout mymaster 10000\n' > /tmp/sentinel.conf && redis-sentinel /tmp/sentinel.conf"
+
+services:
+  redis-master:
+    image: redis:7
+    ports:
+      - 6379:6379
+
+  redis-replica:
+    image: redis:7
+    command: ["redis-server", "--replicaof", "redis-master", "6379"]
+    depends_on:
+      - redis-master
+
+  sentinel-0:
+    <<: *sentinel-common
+    command: *sentinel-command
+    ports:
+      - 26379:26379
+
+  sentinel-1:
+    <<: *sentinel-common
+    command: *sentinel-command
+
+  sentinel-2:
+    <<: *sentinel-common
+    command: *sentinel-command
+
+  reverse-proxy:
+    image: traefik:v3.5
+    command: --api.insecure=true --api.debug=true --providers.file.filename=/etc/traefik/dynamic-sentinel.yaml
+    ports:
+      - "8000:8000"
+      - "8080:8080"
+    volumes:
+      - ./example/traefik-sentinel.yaml:/etc/traefik/traefik.yaml:ro
+      - ./example/dynamic-sentinel.yaml:/etc/traefik/dynamic-sentinel.yaml:ro
+      - .:/plugins-local/src/github.com/MichNG/traefik-distributed-rate-limit/
+    depends_on:
+      - sentinel-0
+      - sentinel-1
+      - sentinel-2
+
+  target:
+    image: traefik/whoami
+    ports:
+      - "80"

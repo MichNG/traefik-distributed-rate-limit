@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: gofmt
+        run: |
+          fmt=$(gofmt -l .)
+          if [ -n "$fmt" ]; then
+            echo "not gofmt-ed:"; echo "$fmt"; exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: tests (race)
+        run: go test -race ./...
+
+      # Loads the plugin with the same Yaegi interpreter Traefik uses: catches
+      # interpreter incompatibilities that the Go compiler accepts.
+      - name: yaegi compatibility check
+        working-directory: tools/yaegicheck
+        run: go run .

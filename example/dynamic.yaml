@@ -1,0 +1,38 @@
+# dynamic.yaml
+#
+# Distributed rate limiting backed by a single Redis instance, with the
+# Traefik Hub configuration schema.
+
+http:
+  routers:
+    my-router:
+      rule: "Host(`localhost`)"
+      entryPoints:
+        - web
+      middlewares:
+        - distributed-ratelimit
+      service: target
+
+  middlewares:
+    distributed-ratelimit:
+      plugin:
+        distributedRateLimit:
+          limit: 5
+          burst: 10
+          period: 10s
+          denyOnError: true
+          responseHeaders: true
+          sourceCriterion:
+            ipStrategy:
+              depth: 1
+          store:
+            redis:
+              endpoints:
+                - redis:6379
+              timeout: 500ms
+
+  services:
+    target:
+      loadBalancer:
+        servers:
+          - url: http://target

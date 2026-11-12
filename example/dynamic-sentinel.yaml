@@ -1,0 +1,41 @@
+# dynamic-sentinel.yaml
+#
+# Distributed rate limiting backed by Redis Sentinel: the master is discovered
+# automatically and a failover is followed transparently.
+
+http:
+  routers:
+    my-router:
+      rule: "Host(`localhost`)"
+      entryPoints:
+        - web
+      middlewares:
+        - distributed-ratelimit
+      service: target
+
+  middlewares:
+    distributed-ratelimit:
+      plugin:
+        distributedRateLimit:
+          limit: 3
+          burst: 10
+          period: 10s
+          denyOnError: false   # keep serving during a Sentinel outage
+          sourceCriterion:
+            requestHeaderName: X-Api-Key
+          responseHeaders: true
+          store:
+            redis:
+              endpoints:
+                - sentinel-0:26379
+                - sentinel-1:26379
+                - sentinel-2:26379
+              timeout: 500ms
+              sentinel:
+                masterSet: mymaster
+
+  services:
+    target:
+      loadBalancer:
+        servers:
+          - url: http://target

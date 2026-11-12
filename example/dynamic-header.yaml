@@ -1,0 +1,37 @@
+# dynamic-header.yaml
+#
+# Rate limiting per API key: the source of the request is the value of the
+# X-Api-Key header, so every key gets its own bucket (and its own limit).
+
+http:
+  routers:
+    my-router:
+      rule: "Host(`localhost`)"
+      entryPoints:
+        - web
+      middlewares:
+        - distributed-ratelimit
+      service: target
+
+  middlewares:
+    distributed-ratelimit:
+      plugin:
+        distributedRateLimit:
+          limit: 3
+          burst: 5
+          period: 10s
+          denyOnError: true
+          responseHeaders: true
+          sourceCriterion:
+            requestHeaderName: X-Api-Key
+          store:
+            redis:
+              endpoints:
+                - redis:6379
+              timeout: 500ms
+
+  services:
+    target:
+      loadBalancer:
+        servers:
+          - url: http://target

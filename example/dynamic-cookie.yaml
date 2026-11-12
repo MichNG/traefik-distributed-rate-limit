@@ -1,0 +1,189 @@
+# dynamic-cookie.yaml
+#
+# Rate limiting by a value taken from a cookie or a header, with this plugin
+# only: no third-party middleware is involved (the analysis of the
+# cookie -> header chain with a third-party extractor plugin) lives in
+# docs/13-cookie-source-analysis.md).
+#
+# Routers:
+#   /cookie-value     the source is the cookie value
+#   /cookie-field     the source is a JSON field of the cookie
+#   /cookie-nested    the source is a nested JSON field of the cookie
+#   /cookie-fallback  no cookie -> the client IP is used instead
+#   /cookie-strict    no cookie -> 429 (denyOnError: true)
+#   /cookie-open      no cookie -> the request reaches the backend (denyOnError: false)
+#   /header           the source is a header (here sent by the client for the demo)
+#   /cookie-typo      a deliberate typo in cookieName: the middleware must be
+#                     disabled with an explicit error
+http:
+  routers:
+    cookie-value:
+      rule: "Host(`localhost`) && PathPrefix(`/cookie-value`)"
+      entryPoints: [web]
+      middlewares: [rl-cookie-value]
+      service: target
+    cookie-field:
+      rule: "Host(`localhost`) && PathPrefix(`/cookie-field`)"
+      entryPoints: [web]
+      middlewares: [rl-cookie-field]
+      service: target
+    cookie-nested:
+      rule: "Host(`localhost`) && PathPrefix(`/cookie-nested`)"
+      entryPoints: [web]
+      middlewares: [rl-cookie-nested]
+      service: target
+    cookie-fallback:
+      rule: "Host(`localhost`) && PathPrefix(`/cookie-fallback`)"
+      entryPoints: [web]
+      middlewares: [rl-cookie-fallback]
+      service: target
+    cookie-strict:
+      rule: "Host(`localhost`) && PathPrefix(`/cookie-strict`)"
+      entryPoints: [web]
+      middlewares: [rl-cookie-strict]
+      service: target
+    cookie-open:
+      rule: "Host(`localhost`) && PathPrefix(`/cookie-open`)"
+      entryPoints: [web]
+      middlewares: [rl-cookie-open]
+      service: target
+    header:
+      rule: "Host(`localhost`) && PathPrefix(`/header`)"
+      entryPoints: [web]
+      middlewares: [rl-header]
+      service: target
+    cookie-typo:
+      rule: "Host(`localhost`) && PathPrefix(`/cookie-typo`)"
+      entryPoints: [web]
+      middlewares: [rl-cookie-typo]
+      service: target
+
+  middlewares:
+    # cookieName only: the source is the whole cookie value.
+    rl-cookie-value:
+      plugin:
+        distributedRateLimit:
+          limit: 3
+          burst: 5
+          period: 10s
+          sourceCriterion:
+            cookieName: _sm_user_id
+            onEmptySource: deny
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # cookieName + a JSON field of the cookie value.
+    rl-cookie-field:
+      plugin:
+        distributedRateLimit:
+          limit: 3
+          burst: 5
+          period: 10s
+          responseHeaders: true
+          sourceCriterion:
+            cookieName: session
+            cookieField: tenant
+            onEmptySource: deny
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # cookieName + a nested JSON field (dot path).
+    rl-cookie-nested:
+      plugin:
+        distributedRateLimit:
+          limit: 3
+          burst: 5
+          period: 10s
+          sourceCriterion:
+            cookieName: _sm_session
+            cookieField: user.id
+            onEmptySource: deny
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # No cookie: fall back to the client IP (from X-Forwarded-For, depth 1).
+    rl-cookie-fallback:
+      plugin:
+        distributedRateLimit:
+          limit: 3
+          burst: 5
+          period: 10s
+          sourceCriterion:
+            cookieName: _sm_user_id
+            onEmptySource: clientIP
+            ipStrategy:
+              depth: 1
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # No cookie: handled like a store error - 429, without touching Redis.
+    rl-cookie-strict:
+      plugin:
+        distributedRateLimit:
+          limit: 3
+          burst: 5
+          period: 10s
+          denyOnError: true
+          sourceCriterion:
+            cookieName: _sm_user_id
+            onEmptySource: denyOnError
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # No cookie: the request reaches the backend (fail-open).
+    rl-cookie-open:
+      plugin:
+        distributedRateLimit:
+          limit: 3
+          burst: 5
+          period: 10s
+          denyOnError: false
+          sourceCriterion:
+            cookieName: _sm_user_id
+            onEmptySource: denyOnError
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # Header source. In a real deployment the header is set by another
+    # middleware (an auth proxy, an identity-aware gateway, ...); here the
+    # client sends it directly so that the option can be exercised with curl.
+    rl-header:
+      plugin:
+        distributedRateLimit:
+          limit: 3
+          burst: 5
+          period: 10s
+          responseHeaders: true
+          sourceCriterion:
+            requestHeaderName: X-Api-Key
+            onEmptySource: deny
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # Deliberate typo: a cookie name can never contain a space. The middleware
+    # must fail at creation time, with the reason visible in Traefik
+    # (/api/http/middlewares/rl-cookie-typo@file).
+    rl-cookie-typo:
+      plugin:
+        distributedRateLimit:
+          limit: 3
+          burst: 5
+          period: 10s
+          sourceCriterion:
+            cookieName: "bad name"
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+  services:
+    target:
+      loadBalancer:
+        servers:
+          - url: http://target

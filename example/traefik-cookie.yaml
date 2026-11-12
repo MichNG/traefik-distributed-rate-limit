@@ -1,0 +1,32 @@
+# traefik-cookie.yaml
+#
+# Static configuration for the cookie/header source examples
+# (example/dynamic-cookie.yaml, docker-compose.cookie.yaml).
+#
+# Only this plugin is used: it is mounted as a local plugin.
+entryPoints:
+  web:
+    address: ":8000"
+    forwardedHeaders:
+      # Makes the client IP visible in X-Forwarded-For, which the
+      # onEmptySource=clientIP fallback (and ipStrategy) rely on. By default
+      # Traefik ignores the header coming from an untrusted peer; in production
+      # use trustedIPs instead of insecure.
+      insecure: true
+
+providers:
+  file:
+    filename: "/etc/traefik/dynamic-cookie.yaml"
+
+api:
+  dashboard: true
+  insecure: true
+
+log:
+  level: DEBUG
+  format: common
+
+experimental:
+  localPlugins:
+    distributedRateLimit:
+      moduleName: github.com/MichNG/traefik-distributed-rate-limit

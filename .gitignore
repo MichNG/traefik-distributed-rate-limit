@@ -1,0 +1,8 @@
+# Go caches kept inside the repository (see run-tests.sh)
+.gocache/
+.gomodcache/
+.gopath/
+.gotmp/
+coverage.txt
+cover.html
+.DS_Store

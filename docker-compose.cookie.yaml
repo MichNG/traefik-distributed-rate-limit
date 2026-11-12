@@ -1,0 +1,21 @@
+services:
+  redis:
+    image: redis:7
+    ports:
+      - 6379:6379
+
+  reverse-proxy:
+    image: traefik:v3.5
+    command: --api.insecure=true --providers.file.filename=/etc/traefik/dynamic-cookie.yaml
+    ports:
+      - "8000:8000"
+      - "8080:8080"
+    volumes:
+      - ./example/traefik-cookie.yaml:/etc/traefik/traefik.yaml:ro
+      - ./example/dynamic-cookie.yaml:/etc/traefik/dynamic-cookie.yaml:ro
+      - .:/plugins-local/src/github.com/MichNG/traefik-distributed-rate-limit/
+
+  target:
+    image: traefik/whoami
+    ports:
+      - "80"
