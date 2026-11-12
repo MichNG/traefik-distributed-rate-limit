@@ -26,7 +26,7 @@ experimental:
   plugins:
     distributedRateLimit:
       moduleName: "github.com/MichNG/traefik-distributed-rate-limit"
-      version: "v2.0.0"
+      version: "v2.0.1"
 ```
 
 For local development, mount the plugin directory and use `localPlugins`:
