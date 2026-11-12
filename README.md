@@ -1,5 +1,7 @@
 # distributedRateLimit
 
+[![CI](https://github.com/MichNG/traefik-distributed-rate-limit/actions/workflows/ci.yml/badge.svg)](https://github.com/MichNG/traefik-distributed-rate-limit/actions/workflows/ci.yml)
+
 `github.com/MichNG/traefik-distributed-rate-limit` - a Traefik middleware plugin
 (distributed rate limiting on a shared Redis store). Standalone project: no
 upstream fork history, module path and plugin name are its own.
