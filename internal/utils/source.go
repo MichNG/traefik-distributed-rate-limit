@@ -1,9 +1,12 @@
 package utils
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 )
 
@@ -26,8 +29,9 @@ func (f ExtractorFunc) Extract(req *http.Request) (string, int64, error) {
 type ExtractSource func(req *http.Request)
 
 // makeCookieExtractor extracts the source from a cookie, optionally from a
-// string field of a JSON cookie value (dot paths allowed).
-func makeCookieExtractor(cookieName, cookieField string) SourceExtractor {
+// field of a JSON cookie value, and optionally from a claim of a JWT held by
+// that cookie or field.
+func makeCookieExtractor(cookieName, cookieField, jwtClaim string) SourceExtractor {
 	return ExtractorFunc(func(req *http.Request) (string, int64, error) {
 		cookie, err := req.Cookie(cookieName)
 		if err != nil || cookie == nil {
@@ -39,65 +43,159 @@ func makeCookieExtractor(cookieName, cookieField string) SourceExtractor {
 			// A JSON payload cannot be sent raw inside a cookie: the quotes are
 			// not valid in a cookie value, so clients (browsers, SDKs) send it
 			// percent-encoded. Try the raw value first, then the decoded one.
-			field, ok := jsonStringField(value, cookieField)
+			field, ok := jsonField(value, cookieField)
 			if !ok {
 				if decoded, err := url.QueryUnescape(value); err == nil {
-					field, ok = jsonStringField(decoded, cookieField)
+					field, ok = jsonField(decoded, cookieField)
 				}
 			}
 			if !ok {
-				return "", 1, nil // not a JSON object, or missing/non-string field
+				return "", 1, nil // not a JSON payload, or missing/unsupported field
 			}
 
 			value = field
+		}
+
+		if jwtClaim != "" {
+			claim, ok := jwtClaimValue(value, jwtClaim)
+			if !ok {
+				return "", 1, nil // not a JWT, or missing/unsupported claim
+			}
+
+			value = claim
 		}
 
 		return value, 1, nil
 	})
 }
 
-// jsonStringField returns a string field of a JSON object. The field may be a
-// dot path ("user.id"), so that a nested payload - the usual shape of a session
-// cookie - can be used directly. ok is false when the payload is not a JSON
-// object, when a path element is missing, or when the value is not a string.
-func jsonStringField(payload, field string) (string, bool) {
-	var object map[string]interface{}
-	if err := json.Unmarshal([]byte(payload), &object); err != nil {
+// makeHeaderExtractor builds the extractor of a request header, optionally from
+// a claim of a JWT carried by that header ("Authorization: Bearer <jwt>").
+func makeHeaderExtractor(header, jwtClaim string) SourceExtractor {
+	return ExtractorFunc(func(req *http.Request) (string, int64, error) {
+		value := req.Header.Get(header)
+
+		if jwtClaim != "" {
+			claim, ok := jwtClaimValue(value, jwtClaim)
+			if !ok {
+				return "", 1, nil
+			}
+
+			value = claim
+		}
+
+		return value, 1, nil
+	})
+}
+
+// jsonField returns a field of a JSON payload as a source key. The field may be
+// a dot path ("user.id"), address array elements by index ("users.0.id",
+// "items[0].id", "a[0][1]"), or mix both. Scalars (string, number, boolean) are
+// accepted, so that a numeric or boolean claim can be used directly; numbers
+// keep the exact text of the payload. ok is false when the payload is not a
+// single JSON value, when a path element is missing, or when the value is null,
+// an object or an array.
+func jsonField(payload, field string) (string, bool) {
+	decoder := json.NewDecoder(strings.NewReader(payload))
+	decoder.UseNumber()
+
+	var document interface{}
+	if err := decoder.Decode(&document); err != nil {
 		return "", false
 	}
 
-	parts := strings.Split(field, ".")
-	var current interface{} = object
+	// Reject trailing content: "{} garbage" is not a JSON payload.
+	if err := decoder.Decode(new(interface{})); err != io.EOF {
+		return "", false
+	}
 
-	for i, part := range parts {
+	parts := strings.Split(normalizeFieldPath(field), ".")
+
+	current := document
+	for _, part := range parts {
 		if part == "" {
 			return "", false
 		}
 
-		level, ok := current.(map[string]interface{})
-		if !ok {
+		switch node := current.(type) {
+		case map[string]interface{}:
+			value, ok := node[part]
+			if !ok {
+				return "", false
+			}
+			current = value
+
+		case []interface{}:
+			index, err := strconv.Atoi(part)
+			if err != nil || index < 0 || index >= len(node) {
+				return "", false
+			}
+			current = node[index]
+
+		default:
+			// A scalar or null cannot be traversed any further.
 			return "", false
 		}
-
-		raw, ok := level[part]
-		if !ok {
-			return "", false
-		}
-
-		if i == len(parts)-1 {
-			value, ok := raw.(string)
-			return value, ok
-		}
-
-		current = raw
 	}
 
-	return "", false
+	return scalarString(current)
 }
 
-// makeHeaderExtractor builds the extractor of a request header.
-func makeHeaderExtractor(header string) SourceExtractor {
-	return ExtractorFunc(func(req *http.Request) (string, int64, error) {
-		return req.Header.Get(header), 1, nil
-	})
+// scalarString renders a JSON scalar as a rate limiting key. Numbers keep the
+// exact text of the payload, which matters for identifiers that do not fit a
+// float64 (snowflake ids, for instance).
+func scalarString(value interface{}) (string, bool) {
+	switch scalar := value.(type) {
+	case string:
+		return scalar, true
+	case json.Number:
+		return scalar.String(), true
+	case bool:
+		return strconv.FormatBool(scalar), true
+	default:
+		// null, an object or an array: not a usable source key on its own.
+		return "", false
+	}
+}
+
+// normalizeFieldPath turns the bracket form into the dot form, so that
+// "items[0].id" and "items.0.id" are the same path. Index segments also resolve
+// against objects, so a payload with numeric keys still works.
+func normalizeFieldPath(field string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(field, "[", "."), "]", "")
+}
+
+// jwtClaimValue returns a claim of a JWS compact token
+// ("header.payload.signature"). The signature is NOT verified: the claim is only
+// used as a rate limiting key, so the token must be validated by another layer
+// (see the README). A missing, empty or malformed token yields ok = false, and
+// the empty-source policy then applies.
+func jwtClaimValue(token, claim string) (string, bool) {
+	parts := strings.Split(strings.TrimSpace(trimBearer(token)), ".")
+	if len(parts) != 3 || parts[0] == "" || parts[1] == "" {
+		return "", false
+	}
+
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		// Some producers pad the payload; base64url without padding is the norm.
+		payload, err = base64.URLEncoding.DecodeString(parts[1])
+		if err != nil {
+			return "", false
+		}
+	}
+
+	return jsonField(string(payload), claim)
+}
+
+// trimBearer drops a "Bearer " prefix (any case), so that the same option works
+// for a raw token and for an Authorization header.
+func trimBearer(value string) string {
+	value = strings.TrimSpace(value)
+
+	if len(value) >= len("bearer ") && strings.EqualFold(value[:len("bearer ")], "bearer ") {
+		return strings.TrimSpace(value[len("bearer "):])
+	}
+
+	return value
 }

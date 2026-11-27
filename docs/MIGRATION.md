@@ -66,7 +66,8 @@ this plugin. All of them are optional, and the defaults keep the v1 behaviour.
 | `store.redis.sentinel.watch` | subscribe to `+switch-master`; when `false`, a failover is only detected by the failing request (pull) | `true` |
 | `whitelistIPs` | addresses or CIDR ranges that bypass rate limiting entirely | — |
 | `sourceCriterion.cookieName` | group the requests by a cookie value, read by the plugin itself | `""` |
-| `sourceCriterion.cookieField` | use a string field (dot path, e.g. `user.id`) of a JSON cookie value instead of the whole value | `""` |
+| `sourceCriterion.cookieField` | use a field (dot path or array index, e.g. `user.id`, `users[0].id`) of a JSON cookie value instead of the whole value; scalars (string, number, boolean) are accepted | `""` |
+| `sourceCriterion.jwtClaim` | use a claim of a JWT held by the cookie (after `cookieField`, if set) or by `requestHeaderName` (`Bearer` prefix optional) instead of the whole value; the signature is **not** verified | `""` |
 | `sourceCriterion.onEmptySource` | what to do when the source cannot be determined: `shared` (one bucket for every unidentified request), `clientIP` (fall back to the client IP, combined with `sourceCriterion.ipStrategy`), `deny` (400 before touching the store), `denyOnError` (behave like a store error: 429 when `denyOnError` is true, pass-through when it is false) | `shared` |
 
 ## 4. Rollout checklist

@@ -12,7 +12,10 @@
 #   /cookie-fallback  no cookie -> the client IP is used instead
 #   /cookie-strict    no cookie -> 429 (denyOnError: true)
 #   /cookie-open      no cookie -> the request reaches the backend (denyOnError: false)
+#   /cookie-array     the source is an array element of the cookie payload
+#   /cookie-jwt       the source is a claim of a JWT held by the cookie
 #   /header           the source is a header (here sent by the client for the demo)
+#   /jwt-header       the source is a claim of a JWT carried by the Authorization header
 #   /cookie-typo      a deliberate typo in cookieName: the middleware must be
 #                     disabled with an explicit error
 http:
@@ -51,6 +54,21 @@ http:
       rule: "Host(`localhost`) && PathPrefix(`/header`)"
       entryPoints: [web]
       middlewares: [rl-header]
+      service: target
+    cookie-array:
+      rule: "Host(`localhost`) && PathPrefix(`/cookie-array`)"
+      entryPoints: [web]
+      middlewares: [rl-cookie-array]
+      service: target
+    cookie-jwt:
+      rule: "Host(`localhost`) && PathPrefix(`/cookie-jwt`)"
+      entryPoints: [web]
+      middlewares: [rl-cookie-jwt]
+      service: target
+    jwt-header:
+      rule: "Host(`localhost`) && PathPrefix(`/jwt-header`)"
+      entryPoints: [web]
+      middlewares: [rl-jwt-header]
       service: target
     cookie-typo:
       rule: "Host(`localhost`) && PathPrefix(`/cookie-typo`)"
@@ -146,6 +164,61 @@ http:
           sourceCriterion:
             cookieName: _sm_user_id
             onEmptySource: denyOnError
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # cookieName + an array element of the JSON payload (both "users.0.id" and
+    # "users[0].id" work; the index may also address an array of scalars).
+    rl-cookie-array:
+      plugin:
+        distributedRateLimit:
+          limit: 3
+          burst: 5
+          period: 10s
+          responseHeaders: true
+          sourceCriterion:
+            cookieName: _sm_session
+            cookieField: users[0].id
+            onEmptySource: deny
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # cookieName + a claim of a JWT held by the cookie: /cookie-jwt.
+    #
+    # The signature is NOT verified (no key material here): the claim is only a
+    # bucketing key, so the token must be validated by another layer. See the
+    # README, "Security: JWT claims".
+    rl-cookie-jwt:
+      plugin:
+        distributedRateLimit:
+          limit: 3
+          burst: 5
+          period: 10s
+          responseHeaders: true
+          sourceCriterion:
+            cookieName: _sm_token
+            jwtClaim: sub
+            onEmptySource: deny
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # The same, with the token in the Authorization header ("Bearer <jwt>"); a
+    # raw token without the prefix works too. Numeric and boolean claims are
+    # accepted, and a dot path selects a nested claim.
+    rl-jwt-header:
+      plugin:
+        distributedRateLimit:
+          limit: 3
+          burst: 5
+          period: 10s
+          responseHeaders: true
+          sourceCriterion:
+            requestHeaderName: Authorization
+            jwtClaim: sub
+            onEmptySource: deny
           store:
             redis:
               endpoints: [redis:6379]

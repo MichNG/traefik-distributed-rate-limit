@@ -2,6 +2,7 @@ package traefik_distributed_rate_limit
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -888,6 +889,14 @@ func TestCircuitBreakerDeniesAfterThreshold(t *testing.T) {
 // Source criterion: cookie and empty-source policy
 // ---------------------------------------------------------------------------
 
+// testJWT builds an unsigned JWS compact token with the given payload.
+func testJWT(payload string) string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	body := base64.RawURLEncoding.EncodeToString([]byte(payload))
+
+	return header + "." + body + ".c2lnbmF0dXJl"
+}
+
 func cookieRequest(remoteAddr, cookie, header string, headerValue string) *http.Request {
 	req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
 	req.RemoteAddr = remoteAddr
@@ -929,6 +938,98 @@ func TestRateLimitByCookie(t *testing.T) {
 	}
 }
 
+func TestRateLimitByCookieArrayField(t *testing.T) {
+	store := &fakeStore{}
+	store.setOutput(redis.ScriptOutput{Allowed: 1, Remaining: 4})
+
+	cfg := decode(t, `{
+		"limit": 5, "burst": 10, "period": "10s",
+		"sourceCriterion": {"cookieName": "session", "cookieField": "users[0].id", "onEmptySource": "deny"},
+		"store": {"redis": {"endpoints": ["redis:6379"]}}
+	}`)
+
+	rl, err := newTestMiddleware(t, cfg, store)
+	if err != nil {
+		t.Fatalf("newTestMiddleware: %v", err)
+	}
+
+	// {"users":[{"id":"u1"},{"id":"u2"}]} percent-encoded.
+	rec := httptest.NewRecorder()
+	rl.ServeHTTP(rec, cookieRequest("192.0.2.10:1234", `session=%7B%22users%22%3A%5B%7B%22id%22%3A%22u1%22%7D%2C%7B%22id%22%3A%22u2%22%7D%5D%7D`, "", ""))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if len(store.keys) != 1 || store.keys[0] != "rate:test:u1" {
+		t.Fatalf("keys = %v, want [rate:test:u1]", store.keys)
+	}
+
+	// Out of range: the empty-source policy applies.
+	rec = httptest.NewRecorder()
+	rl.ServeHTTP(rec, cookieRequest("192.0.2.10:1234", `session=%7B%22users%22%3A%5B%5D%7D`, "", ""))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 for an empty array", rec.Code)
+	}
+}
+
+func TestRateLimitByJWTClaim(t *testing.T) {
+	store := &fakeStore{}
+	store.setOutput(redis.ScriptOutput{Allowed: 1, Remaining: 4})
+
+	cfg := decode(t, `{
+		"limit": 5, "burst": 10, "period": "10s",
+		"sourceCriterion": {"cookieName": "session", "jwtClaim": "sub", "onEmptySource": "deny"},
+		"store": {"redis": {"endpoints": ["redis:6379"]}}
+	}`)
+
+	rl, err := newTestMiddleware(t, cfg, store)
+	if err != nil {
+		t.Fatalf("newTestMiddleware: %v", err)
+	}
+
+	jwt := testJWT(`{"sub":"u1"}`)
+
+	rec := httptest.NewRecorder()
+	rl.ServeHTTP(rec, cookieRequest("192.0.2.10:1234", "session="+jwt, "", ""))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if len(store.keys) != 1 || store.keys[0] != "rate:test:u1" {
+		t.Fatalf("keys = %v, want [rate:test:u1]", store.keys)
+	}
+
+	// A cookie that is not a JWT is an empty source: 400 with onEmptySource=deny.
+	rec = httptest.NewRecorder()
+	rl.ServeHTTP(rec, cookieRequest("192.0.2.10:1234", "session=acme", "", ""))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+func TestRateLimitByJWTClaimFromHeader(t *testing.T) {
+	store := &fakeStore{}
+	store.setOutput(redis.ScriptOutput{Allowed: 1, Remaining: 4})
+
+	cfg := decode(t, `{
+		"limit": 5, "burst": 10, "period": "10s",
+		"sourceCriterion": {"requestHeaderName": "Authorization", "jwtClaim": "sub", "onEmptySource": "deny"},
+		"store": {"redis": {"endpoints": ["redis:6379"]}}
+	}`)
+
+	rl, err := newTestMiddleware(t, cfg, store)
+	if err != nil {
+		t.Fatalf("newTestMiddleware: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	rl.ServeHTTP(rec, cookieRequest("192.0.2.10:1234", "", "Authorization", "Bearer "+testJWT(`{"sub":"u7"}`)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+	if len(store.keys) != 1 || store.keys[0] != "rate:test:u7" {
+		t.Fatalf("keys = %v, want [rate:test:u7]", store.keys)
+	}
+}
+
 func TestRateLimitByCookieField(t *testing.T) {
 	store := &fakeStore{}
 	store.setOutput(redis.ScriptOutput{Allowed: 1, Remaining: 4})
@@ -956,7 +1057,8 @@ func TestRateLimitByCookieField(t *testing.T) {
 		{name: "other tenant", cookie: `session=%7B%22tenant%22%3A%22globex%22%7D`, want: http.StatusOK, key: "rate:test:globex"},
 		{name: "field missing", cookie: `session=%7B%22plan%22%3A%22gold%22%7D`, want: http.StatusBadRequest},
 		{name: "not json", cookie: `session=not-a-json`, want: http.StatusBadRequest},
-		{name: "field not a string", cookie: `session=%7B%22tenant%22%3A42%7D`, want: http.StatusBadRequest},
+		{name: "numeric field", cookie: `session=%7B%22tenant%22%3A42%7D`, want: http.StatusOK, key: "rate:test:42"},
+		{name: "object field", cookie: `session=%7B%22tenant%22%3A%7B%22id%22%3A%22acme%22%7D%7D`, want: http.StatusBadRequest},
 		{name: "empty cookie value", cookie: `session=`, want: http.StatusBadRequest},
 		{name: "cookie absent", cookie: `other=1`, want: http.StatusBadRequest},
 	}

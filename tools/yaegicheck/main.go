@@ -17,6 +17,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha1"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -126,6 +127,7 @@ func main() {
 
 	checkLifecycle(i, newFn)
 	checkCookieSource(i, newFn)
+	checkCookieArrayAndJWT(i, newFn)
 	checkConfigurationErrors(i, newFn)
 	checkReadableStoreErrors(gopath)
 }
@@ -298,6 +300,93 @@ func checkCookieSource(i *interp.Interpreter, newFn reflect.Value) {
 
 	reset()
 
+	handler := buildCookieHandler(i, newFn, serverAddr, "session", "user.id", "", "yaegicheck-cookie")
+
+	cases := []struct {
+		name   string
+		cookie string
+		want   int
+	}{
+		{name: "user acme", cookie: "session=%7B%22user%22%3A%7B%22id%22%3A%22acme%22%7D%7D", want: http.StatusOK},
+		{name: "user globex", cookie: "session=%7B%22user%22%3A%7B%22id%22%3A%22globex%22%7D%7D", want: http.StatusOK},
+		{name: "nested field missing", cookie: "session=%7B%22user%22%3A%7B%22plan%22%3A%22gold%22%7D%7D", want: http.StatusBadRequest},
+		{name: "cookie missing", cookie: "", want: http.StatusBadRequest},
+	}
+
+	for _, tc := range cases {
+		if code := serveCookie(handler, tc.cookie); code != tc.want {
+			fail("%s: status = %d, want %d", tc.name, code, tc.want)
+		} else {
+			fmt.Printf("%-16s -> %d\n", tc.name, code)
+		}
+	}
+
+	fmt.Println("OK: cookie source (with a JSON field) behaves correctly under yaegi")
+}
+
+// checkCookieArrayAndJWT exercises the two recent extensions of the cookie
+// source under yaegi: an array index inside the JSON payload (strconv) and a
+// claim of a JWT held by the cookie (encoding/base64 + encoding/json).
+func checkCookieArrayAndJWT(i *interp.Interpreter, newFn reflect.Value) {
+	fmt.Println("=== cookie source: array index and JWT claim ===")
+
+	serverAddr, stopServer, _, reset := newMockServer()
+	defer stopServer()
+
+	reset()
+
+	// {"users":[{"id":"acme"}]} percent-encoded, addressed by index.
+	arrayHandler := buildCookieHandler(i, newFn, serverAddr, "session", "users[0].id", "", "yaegicheck-cookie-array")
+
+	// {"sub":"acme","uid":7} percent-encoded payload, signed with a dummy value:
+	// the claim is read without verifying the signature.
+	userJWT := testJWT(`{"sub":"acme","uid":7}`)
+
+	arrayCases := []struct {
+		name   string
+		cookie string
+		want   int
+	}{
+		{name: "index in range", cookie: "session=%7B%22users%22%3A%5B%7B%22id%22%3A%22acme%22%7D%5D%7D", want: http.StatusOK},
+		{name: "index out of range", cookie: "session=%7B%22users%22%3A%5B%5D%7D", want: http.StatusBadRequest},
+		{name: "object without array", cookie: "session=%7B%22users%22%3A%7B%22id%22%3A%22acme%22%7D%7D", want: http.StatusBadRequest},
+	}
+
+	for _, tc := range arrayCases {
+		if code := serveCookie(arrayHandler, tc.cookie); code != tc.want {
+			fail("%s: status = %d, want %d", tc.name, code, tc.want)
+		} else {
+			fmt.Printf("%-18s -> %d\n", tc.name, code)
+		}
+	}
+
+	jwtHandler := buildCookieHandler(i, newFn, serverAddr, "session", "", "sub", "yaegicheck-cookie-jwt")
+
+	jwtCases := []struct {
+		name   string
+		cookie string
+		want   int
+	}{
+		{name: "jwt claim", cookie: "session=" + userJWT, want: http.StatusOK},
+		{name: "not a jwt", cookie: "session=acme", want: http.StatusBadRequest},
+		{name: "jwt without claim", cookie: "session=" + testJWT(`{"tenant":"acme"}`), want: http.StatusBadRequest},
+	}
+
+	for _, tc := range jwtCases {
+		if code := serveCookie(jwtHandler, tc.cookie); code != tc.want {
+			fail("%s: status = %d, want %d", tc.name, code, tc.want)
+		} else {
+			fmt.Printf("%-18s -> %d\n", tc.name, code)
+		}
+	}
+
+	fmt.Println("OK: array index and JWT claim sources behave correctly under yaegi")
+}
+
+// buildCookieHandler builds a middleware instance whose source is a cookie
+// (optionally a JSON field of it, optionally a claim of a JWT it carries), and
+// whose store is the in-process RESP stub.
+func buildCookieHandler(i *interp.Interpreter, newFn reflect.Value, serverAddr, cookieName, cookieField, jwtClaim, name string) reflect.Value {
 	cfg, err := i.Eval("traefik_distributed_rate_limit.CreateConfig()")
 	if err != nil {
 		fail("CreateConfig: %v", err)
@@ -309,8 +398,13 @@ func checkCookieSource(i *interp.Interpreter, newFn reflect.Value) {
 	value.FieldByName("Period").SetString("1s")
 
 	criterion := reflect.New(value.FieldByName("SourceCriterion").Type().Elem())
-	criterion.Elem().FieldByName("CookieName").SetString("session")
-	criterion.Elem().FieldByName("CookieField").SetString("user.id")
+	criterion.Elem().FieldByName("CookieName").SetString(cookieName)
+	if cookieField != "" {
+		criterion.Elem().FieldByName("CookieField").SetString(cookieField)
+	}
+	if jwtClaim != "" {
+		criterion.Elem().FieldByName("JWTClaim").SetString(jwtClaim)
+	}
 	criterion.Elem().FieldByName("OnEmptySource").SetString("deny")
 	value.FieldByName("SourceCriterion").Set(criterion)
 
@@ -337,7 +431,7 @@ func checkCookieSource(i *interp.Interpreter, newFn reflect.Value) {
 			reflect.ValueOf(context.Background()),
 			reflect.ValueOf(next),
 			cfg,
-			reflect.ValueOf("yaegicheck-cookie"),
+			reflect.ValueOf(name),
 		})
 		if len(results) > 1 && !results[1].IsNil() {
 			fail("New returned an error: %v", results[1].Interface())
@@ -346,34 +440,29 @@ func checkCookieSource(i *interp.Interpreter, newFn reflect.Value) {
 		handler = results[0]
 	}()
 
-	cases := []struct {
-		name   string
-		cookie string
-		want   int
-	}{
-		{name: "user acme", cookie: "session=%7B%22user%22%3A%7B%22id%22%3A%22acme%22%7D%7D", want: http.StatusOK},
-		{name: "user globex", cookie: "session=%7B%22user%22%3A%7B%22id%22%3A%22globex%22%7D%7D", want: http.StatusOK},
-		{name: "nested field missing", cookie: "session=%7B%22user%22%3A%7B%22plan%22%3A%22gold%22%7D%7D", want: http.StatusBadRequest},
-		{name: "cookie missing", cookie: "", want: http.StatusBadRequest},
+	return handler
+}
+
+// serveCookie runs one request through an interpreted middleware handler.
+func serveCookie(handler reflect.Value, cookie string) int {
+	req := httptest.NewRequest(http.MethodGet, "http://localhost/", nil)
+	req.RemoteAddr = "192.0.2.10:1234"
+	if cookie != "" {
+		req.Header.Set("Cookie", cookie)
 	}
 
-	for _, tc := range cases {
-		req := httptest.NewRequest(http.MethodGet, "http://localhost/", nil)
-		req.RemoteAddr = "192.0.2.10:1234"
-		if tc.cookie != "" {
-			req.Header.Set("Cookie", tc.cookie)
-		}
+	rec := httptest.NewRecorder()
+	handler.MethodByName("ServeHTTP").Call([]reflect.Value{reflect.ValueOf(rec), reflect.ValueOf(req)})
 
-		rec := httptest.NewRecorder()
-		handler.MethodByName("ServeHTTP").Call([]reflect.Value{reflect.ValueOf(rec), reflect.ValueOf(req)})
+	return rec.Code
+}
 
-		if rec.Code != tc.want {
-			fail("%s: status = %d, want %d", tc.name, rec.Code, tc.want)
-		}
-		fmt.Printf("%-16s -> %d\n", tc.name, rec.Code)
-	}
+// testJWT builds an unsigned JWS compact token with the given payload.
+func testJWT(payload string) string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	body := base64.RawURLEncoding.EncodeToString([]byte(payload))
 
-	fmt.Println("OK: cookie source (with a JSON field) behaves correctly under yaegi")
+	return header + "." + body + ".c2lnbmF0dXJl"
 }
 
 // checkLifecycle reproduces what Traefik does on a configuration reload: the

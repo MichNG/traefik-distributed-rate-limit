@@ -57,9 +57,15 @@ type SourceCriterion struct {
 	// CookieName groups the requests by the value of a cookie, instead of
 	// relying on a header set by another middleware (extension of this plugin).
 	CookieName string `json:"cookieName,omitempty" toml:"cookieName,omitempty" yaml:"cookieName,omitempty" mapstructure:"cookieName"`
-	// CookieField extracts a top-level string field when the cookie value is a
-	// JSON object, instead of using the whole cookie value.
+	// CookieField selects a field of a JSON cookie value instead of the whole
+	// cookie value. Dot paths ("user.id"), array indexes ("users.0.id",
+	// "items[0].id") and scalars (string, number, boolean) are supported.
 	CookieField string `json:"cookieField,omitempty" toml:"cookieField,omitempty" yaml:"cookieField,omitempty" mapstructure:"cookieField"`
+	// JWTClaim selects a claim of a JWT instead of the whole value: the token is
+	// read from the cookie (after CookieField, if set) or from the request header
+	// ("Authorization: Bearer <jwt>"). Dot paths and array indexes are supported,
+	// as for CookieField. The signature is NOT verified - see the README.
+	JWTClaim string `json:"jwtClaim,omitempty" toml:"jwtClaim,omitempty" yaml:"jwtClaim,omitempty" mapstructure:"jwtClaim"`
 	// OnEmptySource defines what to do when the source cannot be determined
 	// (missing cookie, missing header, absent JSON field, empty value):
 	//   shared   - all such requests share one bucket (default, historical
@@ -119,6 +125,22 @@ func GetSourceExtractor(sourceMatcher *SourceCriterion) (SourceExtractor, error)
 			}
 		} else if sourceMatcher.CookieField != "" {
 			return nil, errors.New("cookieField requires cookieName")
+		}
+
+		if sourceMatcher.CookieField != "" {
+			if err := validateFieldPath("cookieField", sourceMatcher.CookieField); err != nil {
+				return nil, err
+			}
+		}
+
+		if sourceMatcher.JWTClaim != "" {
+			if sourceMatcher.CookieName == "" && sourceMatcher.RequestHeaderName == "" {
+				return nil, errors.New("jwtClaim requires cookieName or requestHeaderName")
+			}
+
+			if err := validateFieldPath("jwtClaim", sourceMatcher.JWTClaim); err != nil {
+				return nil, err
+			}
 		}
 
 		// ipStrategy is either the criterion itself, or - with
@@ -187,6 +209,50 @@ func validateCookieName(name string) error {
 	return nil
 }
 
+// validateFieldPath rejects paths that can never resolve, so that a
+// configuration typo fails at creation instead of silently producing an empty
+// source (and, with it, a shared bucket). Both the dot form ("user.id",
+// "users.0.id") and the bracket form ("items[0].id") are accepted.
+func validateFieldPath(kind, field string) error {
+	if strings.ContainsAny(field, " \t\r\n") {
+		return fmt.Errorf("invalid %s %q: it must not contain spaces or control characters", kind, field)
+	}
+
+	for i := 0; i < len(field); i++ {
+		switch field[i] {
+		case '[':
+			end := strings.IndexByte(field[i:], ']')
+			if end < 0 {
+				return fmt.Errorf("invalid %s %q: unbalanced array brackets", kind, field)
+			}
+
+			index := field[i+1 : i+end]
+			if index == "" {
+				return fmt.Errorf("invalid %s %q: empty array index", kind, field)
+			}
+
+			for j := 0; j < len(index); j++ {
+				if index[j] < '0' || index[j] > '9' {
+					return fmt.Errorf("invalid %s %q: array index %q is not a number", kind, field, index)
+				}
+			}
+
+			i += end
+
+		case ']':
+			return fmt.Errorf("invalid %s %q: unbalanced array brackets", kind, field)
+		}
+	}
+
+	for _, part := range strings.Split(normalizeFieldPath(field), ".") {
+		if part == "" {
+			return fmt.Errorf("invalid %s %q: empty path element", kind, field)
+		}
+	}
+
+	return nil
+}
+
 // primaryExtractor builds the extractor of the configured criterion, plus the
 // IP strategy used as the fallback when the source is empty.
 //
@@ -216,7 +282,7 @@ func primaryExtractor(sourceMatcher *SourceCriterion) (SourceExtractor, ipStrate
 	}
 
 	if sourceMatcher.RequestHeaderName != "" {
-		return makeHeaderExtractor(sourceMatcher.RequestHeaderName), strategy, nil
+		return makeHeaderExtractor(sourceMatcher.RequestHeaderName, sourceMatcher.JWTClaim), strategy, nil
 	}
 
 	if sourceMatcher.RequestHost {
@@ -226,7 +292,7 @@ func primaryExtractor(sourceMatcher *SourceCriterion) (SourceExtractor, ipStrate
 	}
 
 	if sourceMatcher.CookieName != "" {
-		return makeCookieExtractor(sourceMatcher.CookieName, sourceMatcher.CookieField), strategy, nil
+		return makeCookieExtractor(sourceMatcher.CookieName, sourceMatcher.CookieField, sourceMatcher.JWTClaim), strategy, nil
 	}
 
 	return nil, nil, errors.New("no SourceCriterion criterion defined")
