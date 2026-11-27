@@ -26,7 +26,7 @@ experimental:
   plugins:
     distributedRateLimit:
       moduleName: "github.com/MichNG/traefik-distributed-rate-limit"
-      version: "v1.0.1"
+      version: "v1.1.0"
 ```
 
 > **Versioning.** The module path carries no `/v2` suffix, so the Go module rules
@@ -102,7 +102,7 @@ http:
 | `store.redis.password` | Password used to connect to Redis. `$ENV_VAR` is expanded from the environment. | `""` |
 | `store.redis.database` | Database index (also valid in Sentinel mode). | `0` |
 | `store.redis.timeout` | Timeout applied to dial, read and write operations. | `2s` |
-| `store.redis.poolSize` | Maximum number of idle connections kept per node. | `5` |
+| `store.redis.poolSize` | Maximum number of idle connections kept per node. Defaults to `maxActiveConns`: a smaller idle pool closes connections under concurrency and pays a dial (and an ephemeral port) per request, which ends in `connect: cannot assign requested address` and an open breaker (measured in `docs/16-benchmark-p99.md`). | `maxActiveConns` |
 | `store.redis.maxActiveConns` | Maximum number of connections opened at the same time (in use or idle). The bound is enforced on the client side; while connections are being recycled, Redis may transiently see a few more sockets (an asynchronous TCP close). | `10 * GOMAXPROCS` |
 | `store.redis.sentinel.masterSet` | Name of the Sentinel master set. | — (required with Sentinel) |
 | `store.redis.sentinel.watch` | Subscribe to the Sentinel `+switch-master` events, so that a failover is applied before the next request fails. When disabled, failovers are still handled, but only when a request hits the demoted master. | `true` |
@@ -116,7 +116,8 @@ http:
 | `sourceCriterion.requestHost` | Use the request host as the source. | `false` |
 | `sourceCriterion.requestHeaderName` | Header used to group incoming requests. | `""` |
 | `sourceCriterion.cookieName` | **Extension**: group the requests by a cookie value (the cookie is read by the plugin itself, no rewriting middleware needed). | `""` |
-| `sourceCriterion.cookieField` | **Extension**: take a string field of a JSON cookie value instead of the whole value. Dot paths are supported (`user.id`), the value is percent-decoded first. | `""` |
+| `sourceCriterion.cookieField` | **Extension**: take a field of a JSON cookie value instead of the whole value. Dot paths (`user.id`), array indexes (`users.0.id`, `users[0].id`, `m[1][0]`) and scalars (string, number, boolean — numbers keep their exact text) are supported, and the value is percent-decoded first. | `""` |
+| `sourceCriterion.jwtClaim` | **Extension**: take a claim of a JWT instead of the whole value. The token is read from the cookie (after `cookieField`, if set) or from `requestHeaderName` (`Authorization: Bearer <jwt>`, the prefix is optional). Dot paths and array indexes are supported, as for `cookieField`. **The signature is not verified** — see [Security: JWT claims](#security-jwt-claims). | `""` |
 | `sourceCriterion.onEmptySource` | **Extension**: what to do when the source cannot be determined (missing cookie/header, absent JSON field, empty value): `shared` (all such requests share one bucket), `clientIP` (fall back to the client IP, combined with `ipStrategy`), `deny` (400 before touching the store), `denyOnError` (behave like a store error: 429 when `denyOnError` is true, and let the request reach the backend when it is false). | `shared` |
 | `sourceCriterion.ipStrategy.depth` | Depth in `X-Forwarded-For` used to pick the client IP. | `0` |
 | `sourceCriterion.ipStrategy.excludedIPs` | First `X-Forwarded-For` IP not in the list is the client IP. | — |
@@ -157,7 +158,8 @@ sourceCriterion:
   requestHeaderName: X-Api-Key                          # a header, e.g. set by another middleware
   requestHost: true                                     # the request host
   cookieName: session                                   # a cookie read by the plugin itself
-  cookieField: user.id                                  # optional: JSON field of the cookie (dot path)
+  cookieField: user.id                                  # optional: JSON field of the cookie (dot path or array index)
+  jwtClaim: sub                                         # optional: claim of a JWT held by the cookie or by the header
   onEmptySource: deny                                   # shared | clientIP | deny | denyOnError
 ```
 
@@ -166,9 +168,16 @@ Notes:
 * `cookieName` is validated at creation time: a name that can never match
   (space, `;`, `,`, `=` or control characters) disables the middleware with an
   explicit error instead of silently producing an empty source;
+* `cookieField` and `jwtClaim` are validated the same way, so a typo such as
+  `items[x]`, `user..id` or `roles[0` fails at creation instead of silently
+  producing an empty source;
 * a JSON cookie arrives **percent-encoded** (quotes are not valid inside a cookie
   value): `session=%7B%22tenant%22%3A%22acme%22%7D`. `cookieField` decodes it
-  before parsing.
+  before parsing;
+* both path forms of an array index work (`users.0.id` and `users[0].id`), a
+  numeric segment resolves against an object too (`{"0":"zero"}` with `0`), and
+  numbers keep the exact text of the payload — a snowflake id is not rounded
+  through a `float64`.
 * when the source is a cookie or a header set by another plugin,
   `onEmptySource: denyOnError` is usually what you want: the request is then
   handled exactly like a store error (429 with `Retry-After`, or pass-through
@@ -186,6 +195,26 @@ Notes:
   bypass the limit by rotating it. Prefer `cookieName` above; the analysis, the
   measurements and a hardening recipe for that chain are in
   [../docs/13-cookie-source-analysis.md](../docs/13-cookie-source-analysis.md).
+
+### Security: JWT claims
+
+`sourceCriterion.jwtClaim` **decodes** the token, it does not **verify** it: the
+plugin has no key material, so a client can mint a token with any claim value. A
+rate limiting key taken from an unverified claim can therefore be rotated by an
+attacker to escape its bucket (`{"sub":"a"}`, then `{"sub":"b"}`, ...), and the
+limit stops meaning anything.
+
+Use it only when another layer already validated the token before the request
+reaches the rate limiter (an identity-aware gateway, a `ForwardAuth` middleware,
+or a cookie that the application itself signed), and prefer a claim that this
+layer guarantees (`sub`, `uid`, `tenant`). If the claim is client-controlled, use
+the whole cookie or header value instead (`cookieName`/`requestHeaderName`
+without `jwtClaim`), so that the source is at least stable per client.
+
+The checks are deliberately cheap: the token must have three dot-separated parts
+with a non-empty header and payload, base64url decoding must succeed (padded
+payloads are accepted), and the claim must resolve to a scalar. `exp`/`nbf` are
+**not** enforced — expiry is a matter for the layer that verifies the signature.
 
 ## Lifecycle
 
