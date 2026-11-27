@@ -1,0 +1,138 @@
+# 05-store-auth.yaml - `store.redis.username`, `store.redis.password`,
+# `store.redis.sentinel.masterSet`, `sentinel.username`, `sentinel.password`,
+# `sentinel.watch`
+#
+# Credentials come in pairs. The data plane and the Sentinels have *separate*
+# username/password options, because a production Redis usually gives the
+# Sentinel a different ACL user than the one that runs the Lua bucket script.
+# A `$ENV_VAR` reference is expanded from the environment of the Traefik
+# process; when the variable is missing, the middleware is still created and a
+# warning tells you the password is empty.
+#
+# The stand of this directory runs Redis with two ACL users: `default` with the
+# password in $REDIS_OPTIONS_PASSWORD and `app`/`apppass`, so the credential
+# variants can be exercised for real.
+#
+# Sentinel behaviour (master discovery, failover, watch) needs a Sentinel: see
+# the dedicated stands (`make integration-sentinel`, `make chaos`).
+http:
+  middlewares:
+    # username + password: an ACL user that runs the script.
+    auth-user-pass:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis-auth:6379]
+              username: app
+              password: apppass
+
+    # password only: the ACL `default` user. This is the shape that *breaks*
+    # on an ACL-protected Redis when the operator puts the ACL user in
+    # `username` and omits it here (that is the classic
+    # `WRONGPASS invalid username-password pair` report).
+    auth-password-only:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis-auth:6379]
+              password: optionspass
+
+    # $ENV_VAR indirection: the password is read from the environment of the
+    # Traefik process instead of being inlined in the configuration.
+    auth-env-var:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis-auth:6379]
+              password: "$REDIS_OPTIONS_PASSWORD"
+
+    # $ENV_VAR that is not set: the middleware is created, the password is
+    # empty, and the log carries
+    # 'store.redis.password references an environment variable that is not set'.
+    auth-env-unset:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis-auth:6379]
+              password: "$REDIS_OPTIONS_MISSING"
+
+    # --- Sentinel ----------------------------------------------------------
+    # A master set name is mandatory in Sentinel mode: without it, the
+    # middleware is refused with
+    # 'store.redis.sentinel.masterSet is required when store.redis.sentinel is used'
+    # (see 09-negatives.yaml).
+    sentinel-master-set:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints:
+                - sentinel-0:26379
+                - sentinel-1:26379
+                - sentinel-2:26379
+              sentinel:
+                masterSet: mymaster
+
+    # Sentinel credentials different from the data-plane ones: `sentineluser`
+    # authenticates against the Sentinels, `app` runs the bucket script on the
+    # master. Both pairs are independent.
+    sentinel-creds:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints:
+                - sentinel-0:26379
+                - sentinel-1:26379
+                - sentinel-2:26379
+              username: app
+              password: apppass
+              sentinel:
+                masterSet: mymaster
+                username: sentineluser
+                password: sentinelpass
+
+    # watch: true (default) subscribes to +switch-master, so a failover is
+    # applied before the next request fails.
+    sentinel-watch-true:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [sentinel-0:26379]
+              sentinel:
+                masterSet: mymaster
+                watch: true
+
+    # watch: false keeps the failover handling, but only when a request hits
+    # the demoted master (READONLY): one request pays for the detection.
+    sentinel-watch-false:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [sentinel-0:26379]
+              sentinel:
+                masterSet: mymaster
+                watch: false
+

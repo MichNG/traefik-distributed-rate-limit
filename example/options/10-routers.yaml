@@ -1,0 +1,584 @@
+# 10-routers.yaml - the wiring of this directory
+#
+# Traefik instantiates a middleware when a router uses it: a middleware that no
+# router references is never built, so a configuration error inside it goes
+# unreported (the API even reports such a middleware as enabled). This file
+# references every middleware of the directory exactly once, so that
+# hack/options/run.sh can assert, for real:
+#
+#   * a positive middleware is created (status "enabled", no error) - every
+#     option and every variant of its value is exercised this way;
+#   * a negative middleware is refused (status "disabled" with the documented
+#     error) - the router that uses it then answers 404 and never reaches the
+#     backend.
+#
+# The routers also give every middleware a stable URL, which the behavioural
+# checks of the stand and the table of docs/18-options.md point at:
+#
+#   http://localhost:29000/mw/<middleware name>
+#
+http:
+  routers:
+    opt-rate-defaults:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/rate-defaults`)"
+      entryPoints: [web]
+      middlewares: [rate-defaults]
+      service: options-target
+
+    opt-rate-zero-limit:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/rate-zero-limit`)"
+      entryPoints: [web]
+      middlewares: [rate-zero-limit]
+      service: options-target
+
+    opt-rate-limit-100:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/rate-limit-100`)"
+      entryPoints: [web]
+      middlewares: [rate-limit-100]
+      service: options-target
+
+    opt-rate-period-500ms:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/rate-period-500ms`)"
+      entryPoints: [web]
+      middlewares: [rate-period-500ms]
+      service: options-target
+
+    opt-rate-period-1m:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/rate-period-1m`)"
+      entryPoints: [web]
+      middlewares: [rate-period-1m]
+      service: options-target
+
+    opt-rate-period-whole-seconds:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/rate-period-whole-seconds`)"
+      entryPoints: [web]
+      middlewares: [rate-period-whole-seconds]
+      service: options-target
+
+    opt-rate-burst-default:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/rate-burst-default`)"
+      entryPoints: [web]
+      middlewares: [rate-burst-default]
+      service: options-target
+
+    opt-rate-burst-explicit:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/rate-burst-explicit`)"
+      entryPoints: [web]
+      middlewares: [rate-burst-explicit]
+      service: options-target
+
+    opt-rate-limit-burst-combo:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/rate-limit-burst-combo`)"
+      entryPoints: [web]
+      middlewares: [rate-limit-burst-combo]
+      service: options-target
+
+    opt-rate-deny-on-error-true:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/rate-deny-on-error-true`)"
+      entryPoints: [web]
+      middlewares: [rate-deny-on-error-true]
+      service: options-target
+
+    opt-rate-deny-on-error-false:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/rate-deny-on-error-false`)"
+      entryPoints: [web]
+      middlewares: [rate-deny-on-error-false]
+      service: options-target
+
+    opt-rate-headers-true:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/rate-headers-true`)"
+      entryPoints: [web]
+      middlewares: [rate-headers-true]
+      service: options-target
+
+    opt-rate-headers-false:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/rate-headers-false`)"
+      entryPoints: [web]
+      middlewares: [rate-headers-false]
+      service: options-target
+
+    opt-src-ip-default:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-ip-default`)"
+      entryPoints: [web]
+      middlewares: [src-ip-default]
+      service: options-target
+
+    opt-src-ip-depth:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-ip-depth`)"
+      entryPoints: [web]
+      middlewares: [src-ip-depth]
+      service: options-target
+
+    opt-src-ip-excluded:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-ip-excluded`)"
+      entryPoints: [web]
+      middlewares: [src-ip-excluded]
+      service: options-target
+
+    opt-src-ip-depth-excluded:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-ip-depth-excluded`)"
+      entryPoints: [web]
+      middlewares: [src-ip-depth-excluded]
+      service: options-target
+
+    opt-src-header:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-header`)"
+      entryPoints: [web]
+      middlewares: [src-header]
+      service: options-target
+
+    opt-src-host:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-host`)"
+      entryPoints: [web]
+      middlewares: [src-host]
+      service: options-target
+
+    opt-src-cookie-value:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-cookie-value`)"
+      entryPoints: [web]
+      middlewares: [src-cookie-value]
+      service: options-target
+
+    opt-src-cookie-field-dot:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-cookie-field-dot`)"
+      entryPoints: [web]
+      middlewares: [src-cookie-field-dot]
+      service: options-target
+
+    opt-src-cookie-array-dot:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-cookie-array-dot`)"
+      entryPoints: [web]
+      middlewares: [src-cookie-array-dot]
+      service: options-target
+
+    opt-src-cookie-array-bracket:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-cookie-array-bracket`)"
+      entryPoints: [web]
+      middlewares: [src-cookie-array-bracket]
+      service: options-target
+
+    opt-src-cookie-scalar-number:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-cookie-scalar-number`)"
+      entryPoints: [web]
+      middlewares: [src-cookie-scalar-number]
+      service: options-target
+
+    opt-src-jwt-cookie:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-jwt-cookie`)"
+      entryPoints: [web]
+      middlewares: [src-jwt-cookie]
+      service: options-target
+
+    opt-src-jwt-cookie-field:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-jwt-cookie-field`)"
+      entryPoints: [web]
+      middlewares: [src-jwt-cookie-field]
+      service: options-target
+
+    opt-src-jwt-header-bearer:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-jwt-header-bearer`)"
+      entryPoints: [web]
+      middlewares: [src-jwt-header-bearer]
+      service: options-target
+
+    opt-src-jwt-header-raw:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-jwt-header-raw`)"
+      entryPoints: [web]
+      middlewares: [src-jwt-header-raw]
+      service: options-target
+
+    opt-src-empty-shared:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-empty-shared`)"
+      entryPoints: [web]
+      middlewares: [src-empty-shared]
+      service: options-target
+
+    opt-src-empty-clientip:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-empty-clientip`)"
+      entryPoints: [web]
+      middlewares: [src-empty-clientip]
+      service: options-target
+
+    opt-src-empty-deny:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-empty-deny`)"
+      entryPoints: [web]
+      middlewares: [src-empty-deny]
+      service: options-target
+
+    opt-src-empty-denyonerror-true:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-empty-denyonerror-true`)"
+      entryPoints: [web]
+      middlewares: [src-empty-denyonerror-true]
+      service: options-target
+
+    opt-src-empty-denyonerror-false:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-empty-denyonerror-false`)"
+      entryPoints: [web]
+      middlewares: [src-empty-denyonerror-false]
+      service: options-target
+
+    opt-src-empty-header-deny:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/src-empty-header-deny`)"
+      entryPoints: [web]
+      middlewares: [src-empty-header-deny]
+      service: options-target
+
+    opt-wl-single-ip:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/wl-single-ip`)"
+      entryPoints: [web]
+      middlewares: [wl-single-ip]
+      service: options-target
+
+    opt-wl-cidr:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/wl-cidr`)"
+      entryPoints: [web]
+      middlewares: [wl-cidr]
+      service: options-target
+
+    opt-wl-multiple:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/wl-multiple`)"
+      entryPoints: [web]
+      middlewares: [wl-multiple]
+      service: options-target
+
+    opt-db-defaults:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/db-defaults`)"
+      entryPoints: [web]
+      middlewares: [db-defaults]
+      service: options-target
+
+    opt-db-zero:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/db-zero`)"
+      entryPoints: [web]
+      middlewares: [db-zero]
+      service: options-target
+
+    opt-db-three:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/db-three`)"
+      entryPoints: [web]
+      middlewares: [db-three]
+      service: options-target
+
+    opt-db-failover-endpoints:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/db-failover-endpoints`)"
+      entryPoints: [web]
+      middlewares: [db-failover-endpoints]
+      service: options-target
+
+    opt-db-timeout-500ms:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/db-timeout-500ms`)"
+      entryPoints: [web]
+      middlewares: [db-timeout-500ms]
+      service: options-target
+
+    opt-db-timeout-1m:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/db-timeout-1m`)"
+      entryPoints: [web]
+      middlewares: [db-timeout-1m]
+      service: options-target
+
+    opt-db-pool-defaults:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/db-pool-defaults`)"
+      entryPoints: [web]
+      middlewares: [db-pool-defaults]
+      service: options-target
+
+    opt-db-pool-explicit:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/db-pool-explicit`)"
+      entryPoints: [web]
+      middlewares: [db-pool-explicit]
+      service: options-target
+
+    opt-db-pool-small:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/db-pool-small`)"
+      entryPoints: [web]
+      middlewares: [db-pool-small]
+      service: options-target
+
+    opt-db-idle-zero:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/db-idle-zero`)"
+      entryPoints: [web]
+      middlewares: [db-idle-zero]
+      service: options-target
+
+    opt-db-idle-30s:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/db-idle-30s`)"
+      entryPoints: [web]
+      middlewares: [db-idle-30s]
+      service: options-target
+
+    opt-db-failover-endpoints-available:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/db-failover-endpoints-available`)"
+      entryPoints: [web]
+      middlewares: [db-failover-endpoints-available]
+      service: options-target
+
+    opt-db-failover-healthy-first:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/db-failover-healthy-first`)"
+      entryPoints: [web]
+      middlewares: [db-failover-healthy-first]
+      service: options-target
+
+    opt-auth-user-pass:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/auth-user-pass`)"
+      entryPoints: [web]
+      middlewares: [auth-user-pass]
+      service: options-target
+
+    opt-auth-password-only:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/auth-password-only`)"
+      entryPoints: [web]
+      middlewares: [auth-password-only]
+      service: options-target
+
+    opt-auth-env-var:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/auth-env-var`)"
+      entryPoints: [web]
+      middlewares: [auth-env-var]
+      service: options-target
+
+    opt-auth-env-unset:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/auth-env-unset`)"
+      entryPoints: [web]
+      middlewares: [auth-env-unset]
+      service: options-target
+
+    opt-sentinel-master-set:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/sentinel-master-set`)"
+      entryPoints: [web]
+      middlewares: [sentinel-master-set]
+      service: options-target
+
+    opt-sentinel-creds:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/sentinel-creds`)"
+      entryPoints: [web]
+      middlewares: [sentinel-creds]
+      service: options-target
+
+    opt-sentinel-watch-true:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/sentinel-watch-true`)"
+      entryPoints: [web]
+      middlewares: [sentinel-watch-true]
+      service: options-target
+
+    opt-sentinel-watch-false:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/sentinel-watch-false`)"
+      entryPoints: [web]
+      middlewares: [sentinel-watch-false]
+      service: options-target
+
+    opt-tls-ca-path:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/tls-ca-path`)"
+      entryPoints: [web]
+      middlewares: [tls-ca-path]
+      service: options-target
+
+    opt-tls-ca-inline:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/tls-ca-inline`)"
+      entryPoints: [web]
+      middlewares: [tls-ca-inline]
+      service: options-target
+
+    opt-tls-ca-alias:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/tls-ca-alias`)"
+      entryPoints: [web]
+      middlewares: [tls-ca-alias]
+      service: options-target
+
+    opt-tls-mtls-path:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/tls-mtls-path`)"
+      entryPoints: [web]
+      middlewares: [tls-mtls-path]
+      service: options-target
+
+    opt-tls-mtls-inline:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/tls-mtls-inline`)"
+      entryPoints: [web]
+      middlewares: [tls-mtls-inline]
+      service: options-target
+
+    opt-tls-insecure-skip-verify:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/tls-insecure-skip-verify`)"
+      entryPoints: [web]
+      middlewares: [tls-insecure-skip-verify]
+      service: options-target
+
+    opt-tls-verify-server:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/tls-verify-server`)"
+      entryPoints: [web]
+      middlewares: [tls-verify-server]
+      service: options-target
+
+    opt-legacy-all-flat-keys:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/legacy-all-flat-keys`)"
+      entryPoints: [web]
+      middlewares: [legacy-all-flat-keys]
+      service: options-target
+
+    opt-legacy-minimal:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/legacy-minimal`)"
+      entryPoints: [web]
+      middlewares: [legacy-minimal]
+      service: options-target
+
+    opt-legacy-new-keys-win:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/legacy-new-keys-win`)"
+      entryPoints: [web]
+      middlewares: [legacy-new-keys-win]
+      service: options-target
+
+    opt-legacy-timeout-only:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/legacy-timeout-only`)"
+      entryPoints: [web]
+      middlewares: [legacy-timeout-only]
+      service: options-target
+
+    opt-brk-default:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/brk-default`)"
+      entryPoints: [web]
+      middlewares: [brk-default]
+      service: options-target
+
+    opt-brk-explicit-defaults:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/brk-explicit-defaults`)"
+      entryPoints: [web]
+      middlewares: [brk-explicit-defaults]
+      service: options-target
+
+    opt-brk-strict:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/brk-strict`)"
+      entryPoints: [web]
+      middlewares: [brk-strict]
+      service: options-target
+
+    opt-brk-extreme:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/brk-extreme`)"
+      entryPoints: [web]
+      middlewares: [brk-extreme]
+      service: options-target
+
+    opt-tls-cert-without-key:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/tls-cert-without-key`)"
+      entryPoints: [web]
+      middlewares: [tls-cert-without-key]
+      service: options-target
+
+    opt-tls-cert-file-missing:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/tls-cert-file-missing`)"
+      entryPoints: [web]
+      middlewares: [tls-cert-file-missing]
+      service: options-target
+
+    opt-bad-empty-endpoints:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/bad-empty-endpoints`)"
+      entryPoints: [web]
+      middlewares: [bad-empty-endpoints]
+      service: options-target
+
+    opt-bad-cluster:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/bad-cluster`)"
+      entryPoints: [web]
+      middlewares: [bad-cluster]
+      service: options-target
+
+    opt-bad-cluster-empty-map:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/bad-cluster-empty-map`)"
+      entryPoints: [web]
+      middlewares: [bad-cluster-empty-map]
+      service: options-target
+
+    opt-bad-jwt-without-source:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/bad-jwt-without-source`)"
+      entryPoints: [web]
+      middlewares: [bad-jwt-without-source]
+      service: options-target
+
+    opt-bad-cookiefield-without-cookiename:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/bad-cookiefield-without-cookiename`)"
+      entryPoints: [web]
+      middlewares: [bad-cookiefield-without-cookiename]
+      service: options-target
+
+    opt-bad-nonnumeric-index:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/bad-nonnumeric-index`)"
+      entryPoints: [web]
+      middlewares: [bad-nonnumeric-index]
+      service: options-target
+
+    opt-bad-negative-pool:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/bad-negative-pool`)"
+      entryPoints: [web]
+      middlewares: [bad-negative-pool]
+      service: options-target
+
+    opt-bad-negative-limit:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/bad-negative-limit`)"
+      entryPoints: [web]
+      middlewares: [bad-negative-limit]
+      service: options-target
+
+    opt-bad-period:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/bad-period`)"
+      entryPoints: [web]
+      middlewares: [bad-period]
+      service: options-target
+
+    opt-bad-zero-period:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/bad-zero-period`)"
+      entryPoints: [web]
+      middlewares: [bad-zero-period]
+      service: options-target
+
+    opt-bad-emptysource-policy:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/bad-emptysource-policy`)"
+      entryPoints: [web]
+      middlewares: [bad-emptysource-policy]
+      service: options-target
+
+    opt-bad-two-criteria:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/bad-two-criteria`)"
+      entryPoints: [web]
+      middlewares: [bad-two-criteria]
+      service: options-target
+
+    opt-bad-ip-strategy-with-criterion:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/bad-ip-strategy-with-criterion`)"
+      entryPoints: [web]
+      middlewares: [bad-ip-strategy-with-criterion]
+      service: options-target
+
+    opt-bad-timeout:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/bad-timeout`)"
+      entryPoints: [web]
+      middlewares: [bad-timeout]
+      service: options-target
+
+    opt-bad-idle-timeout:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/bad-idle-timeout`)"
+      entryPoints: [web]
+      middlewares: [bad-idle-timeout]
+      service: options-target
+
+    opt-bad-whitelist-entry:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/bad-whitelist-entry`)"
+      entryPoints: [web]
+      middlewares: [bad-whitelist-entry]
+      service: options-target
+
+    opt-bad-endpoint-format:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/bad-endpoint-format`)"
+      entryPoints: [web]
+      middlewares: [bad-endpoint-format]
+      service: options-target
+
+    opt-bad-sentinel-without-masterset:
+      rule: "Host(`localhost`) && PathPrefix(`/mw/bad-sentinel-without-masterset`)"
+      entryPoints: [web]
+      middlewares: [bad-sentinel-without-masterset]
+      service: options-target
+
+  services:
+    options-target:
+      loadBalancer:
+        servers:
+          - url: http://target

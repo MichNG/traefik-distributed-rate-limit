@@ -1,4 +1,4 @@
-.PHONY: test test-race cover lint yaegi-check integration integration-sentinel integration-cookie integration-acl integration-nightly chaos bench bench-e2e
+.PHONY: test test-race cover lint yaegi-check integration integration-sentinel integration-cookie integration-acl integration-nightly integration-options chaos bench bench-e2e
 
 # Runs gofmt, go vet and the whole test suite. The Go caches are kept inside
 # the repository so that the target also works in restricted environments.
@@ -29,6 +29,13 @@ integration-cookie:
 # Redis Sentinel behind an ACL user, with separate Sentinel credentials.
 integration-acl:
 	@docker compose -f docker-compose.acl.yaml up -d
+
+# Every option of the Options table with all its variants: each file of
+# example/options/ is loaded by a real Traefik, the positive middlewares are
+# checked for creation, the negative ones for their exact refusal message, plus
+# behavioural checks. Run it before a release that touches the configuration.
+integration-options:
+	@./hack/options/run.sh
 
 # The docker stands the nightly workflow runs (same scripts, non-default host
 # ports, every script brings its own stand up and down).

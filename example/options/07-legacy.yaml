@@ -1,0 +1,60 @@
+# 07-legacy.yaml - the deprecated v1 flat keys
+#
+# `average`, `redisAddress`, `redisDb`, `redisPassword`,
+# `redisConnectionTimeout`, `breakerThreshold`, `breakerReattempt` still work,
+# and each one logs a deprecation warning at middleware creation. They are
+# *only* applied when the new `store.redis` section is entirely absent: a
+# half-migrated configuration never silently overrides the new values (the
+# legacy key is then warned about and ignored).
+http:
+  middlewares:
+    # The complete v1 shape in one middleware: everything is honoured, and the
+    # log carries six deprecation warnings (one per folded key).
+    legacy-all-flat-keys:
+      plugin:
+        distributedRateLimit:
+          average: 5
+          redisAddress: redis-auth:6379
+          redisDb: 2
+          redisPassword: optionspass
+          redisConnectionTimeout: 1
+          breakerThreshold: 5
+          breakerReattempt: 30
+
+    # The v1 shape without the optional keys: only `average` and
+    # `redisAddress` are set, so only those two warn.
+    legacy-minimal:
+      plugin:
+        distributedRateLimit:
+          average: 3
+          redisAddress: redis:6379
+
+    # New keys win: `store.redis.*` is configured, so every legacy key that is
+    # also present is ignored with
+    # '"<key>" is deprecated and ignored because "<replacement>" is configured'.
+    # `average` is ignored in favour of `limit`.
+    legacy-new-keys-win:
+      plugin:
+        distributedRateLimit:
+          limit: 7
+          average: 999
+          redisAddress: redis-nowhere:6379
+          redisDb: 9
+          redisPassword: not-the-password
+          redisConnectionTimeout: 99
+          breakerThreshold: 1
+          breakerReattempt: 1
+          store:
+            redis:
+              endpoints: [redis-auth:6379]
+              password: optionspass
+              database: 0
+              timeout: 2s
+
+    # A single legacy key alone still gets its warning, and the rest defaults.
+    legacy-timeout-only:
+      plugin:
+        distributedRateLimit:
+          redisAddress: redis:6379
+          redisConnectionTimeout: 3
+

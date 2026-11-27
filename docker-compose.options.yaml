@@ -1,0 +1,51 @@
+# docker-compose.options.yaml
+#
+# The stand behind `make integration-options` (hack/options/run.sh): every file
+# of example/options/ is loaded by the file provider in directory mode, against
+# a Redis that requires a password (two ACL users) so that the credential
+# variants can be exercised for real.
+#
+# The stand needs the fixtures the script generates in artifacts/options/
+# (certs/ for the TLS path variants, redis.conf for the ACL users), so start it
+# through the script:
+#
+#   HTTP_PORT=29000 API_PORT=29080 hack/options/run.sh
+#
+# Redis is not published on the host; the host ports are parameterized so that
+# several stands can run side by side.
+services:
+  # The Redis of most examples: no credentials, as in the README's first
+  # examples (`store.redis.endpoints` and nothing else).
+  redis:
+    image: redis:7
+
+  # The Redis of 05-store-auth.yaml and of the legacy password example: two ACL
+  # users (see the generated redis.conf), so that the credential options can be
+  # exercised for real instead of merely being accepted by the configuration.
+  redis-auth:
+    image: redis:7
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - ./artifacts/options/redis.conf:/usr/local/etc/redis/redis.conf:ro
+
+  reverse-proxy:
+    image: traefik:v3.5
+    command: --providers.file.directory=/etc/traefik/options
+    ports:
+      - "${HTTP_PORT:-29000}:8000"
+      - "${API_PORT:-29080}:8080"
+    environment:
+      # The `default` ACL user password, referenced by 05-store-auth.yaml as
+      # `$REDIS_OPTIONS_PASSWORD`. REDIS_OPTIONS_MISSING is deliberately not
+      # set: that middleware must warn about the missing variable.
+      REDIS_OPTIONS_PASSWORD: "optionspass"
+    volumes:
+      - ./example/traefik-options.yaml:/etc/traefik/traefik.yaml:ro
+      - ./example/options:/etc/traefik/options:ro
+      - ./artifacts/options/certs:/etc/traefik/certs:ro
+      - .:/plugins-local/src/github.com/MichNG/traefik-distributed-rate-limit/
+
+  target:
+    image: traefik/whoami
+    ports:
+      - "80"

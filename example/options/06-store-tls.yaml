@@ -1,0 +1,174 @@
+# 06-store-tls.yaml - `store.redis.tls.caBundle`, `.ca` (alias), `.cert`,
+# `.key`, `.insecureSkipVerify`
+#
+# TLS is applied to the socket, so one section secures both the Sentinel
+# connections and the master connection. `caBundle` and `cert`/`key` accept
+# either a file path or the PEM content itself; `caBundle` and `ca` are aliases
+# (Hub and Traefik OSS spelling). A client certificate and its key are a pair:
+# one without the other is a configuration error.
+#
+# The path variants below point at /etc/traefik/certs, which the stand of this
+# directory fills with generated fixtures (see hack/options/run.sh). The inline
+# variants are self-contained: the PEM of a throw-away test CA and client
+# certificate is written in the file.
+http:
+  middlewares:
+    # caBundle as a file path: verify the Redis server certificate against your
+    # own CA.
+    tls-ca-path:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              tls:
+                caBundle: /etc/traefik/certs/redis-ca.crt
+
+    # caBundle as inline PEM: nothing to mount, handy for a small deployment.
+    tls-ca-inline:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              tls:
+                caBundle: |
+                  -----BEGIN CERTIFICATE-----
+                  MIIBXTCCAQSgAwIBAgIUdenz7nD/QMMVDd48pK9P0KQ0SDQwCgYIKoZIzj0EAwIw
+                  FTETMBEGA1UEAwwKb3B0aW9ucy1jYTAeFw0yNjExMjcwNzM1MjJaFw0zNjExMjQw
+                  NzM1MjJaMBUxEzARBgNVBAMMCm9wdGlvbnMtY2EwWTATBgcqhkjOPQIBBggqhkjO
+                  PQMBBwNCAATkB6xfOPk2e2YoGbLmo9VRSbGlX5Pl3vNRHyCVFAOfqjrlWBqwtQnn
+                  c/Rnf5uKG08HPlaQSvoj95cEQqn0T/s4ozIwMDAdBgNVHQ4EFgQUrRllL83M6mmz
+                  7JCNpGUOkg2TbrkwDwYDVR0TAQH/BAUwAwEB/zAKBggqhkjOPQQDAgNHADBEAiAF
+                  vd2vYU+YwyxqD96ZOhanMdIJPtFvIYsBCR5ICqqP5wIgT5oDU+G6DQOjZi8AlN0S
+                  gcZSvSC0ZRbv/0+jOL8wYac=
+                  -----END CERTIFICATE-----
+
+    # `ca` is the Traefik OSS spelling and behaves exactly like `caBundle`.
+    tls-ca-alias:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              tls:
+                ca: /etc/traefik/certs/redis-ca.crt
+
+    # mTLS with paths: the client certificate and its key, plus the CA that
+    # signed the server certificate.
+    tls-mtls-path:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              tls:
+                caBundle: /etc/traefik/certs/redis-ca.crt
+                cert: /etc/traefik/certs/client.crt
+                key: /etc/traefik/certs/client.key
+
+    # mTLS with inline material: cert and key are PEM blocks (they must be a
+    # pair; a mismatched pair is refused by the TLS stack at creation).
+    tls-mtls-inline:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              tls:
+                caBundle: |
+                  -----BEGIN CERTIFICATE-----
+                  MIIBXTCCAQSgAwIBAgIUdenz7nD/QMMVDd48pK9P0KQ0SDQwCgYIKoZIzj0EAwIw
+                  FTETMBEGA1UEAwwKb3B0aW9ucy1jYTAeFw0yNjExMjcwNzM1MjJaFw0zNjExMjQw
+                  NzM1MjJaMBUxEzARBgNVBAMMCm9wdGlvbnMtY2EwWTATBgcqhkjOPQIBBggqhkjO
+                  PQMBBwNCAATkB6xfOPk2e2YoGbLmo9VRSbGlX5Pl3vNRHyCVFAOfqjrlWBqwtQnn
+                  c/Rnf5uKG08HPlaQSvoj95cEQqn0T/s4ozIwMDAdBgNVHQ4EFgQUrRllL83M6mmz
+                  7JCNpGUOkg2TbrkwDwYDVR0TAQH/BAUwAwEB/zAKBggqhkjOPQQDAgNHADBEAiAF
+                  vd2vYU+YwyxqD96ZOhanMdIJPtFvIYsBCR5ICqqP5wIgT5oDU+G6DQOjZi8AlN0S
+                  gcZSvSC0ZRbv/0+jOL8wYac=
+                  -----END CERTIFICATE-----
+                cert: |
+                  -----BEGIN CERTIFICATE-----
+                  MIIBcjCCARigAwIBAgIUJRgfdtEnMi1LvbCUtPQZnlCsiO4wCgYIKoZIzj0EAwIw
+                  FTETMBEGA1UEAwwKb3B0aW9ucy1jYTAeFw0yNjExMjcwNzM1MjJaFw0zNjExMjQw
+                  NzM1MjJaMBkxFzAVBgNVBAMMDm9wdGlvbnMtY2xpZW50MFkwEwYHKoZIzj0CAQYI
+                  KoZIzj0DAQcDQgAEi4oLxAs6mIavea/OCFmQ9uCxdAyG2KjL2Wa/2M+G9gAcWKFw
+                  upb2nGfKzh7+6hyVOhPJfLH22Zal4R7xJv+vd6NCMEAwHQYDVR0OBBYEFGGfebMc
+                  SZvuOmT1/qJNGzvRbhZrMB8GA1UdIwQYMBaAFK0ZZS/NzOpps+yQjaRlDpINk265
+                  MAoGCCqGSM49BAMCA0gAMEUCIQDen1/SdDAwgKzp7+QGQzkO75NFk0BXaRJUDSC4
+                  zVlsiAIgTp6vMyGu+etM0TV4vxSmvTA3E9GnmryiqjErAezGuuQ=
+                  -----END CERTIFICATE-----
+                key: |
+                  -----BEGIN EC PRIVATE KEY-----
+                  MHcCAQEEIPW+drCodtT8Q4OHbOFnz5caAG8a8dKG0SMu0s1hjXzJoAoGCCqGSM49
+                  AwEHoUQDQgAEi4oLxAs6mIavea/OCFmQ9uCxdAyG2KjL2Wa/2M+G9gAcWKFwupb2
+                  nGfKzh7+6hyVOhPJfLH22Zal4R7xJv+vdw==
+                  -----END EC PRIVATE KEY-----
+
+    # insecureSkipVerify: true - no server certificate verification (a
+    # self-signed certificate on an IP works). Note that `caBundle` becomes
+    # decorative: the option exists for a lab or a migration window, not for
+    # production.
+    tls-insecure-skip-verify:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              tls:
+                caBundle: /etc/traefik/certs/redis-ca.crt
+                insecureSkipVerify: true
+
+    # insecureSkipVerify: false (the default) with a CA: full verification.
+    tls-verify-server:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              tls:
+                caBundle: /etc/traefik/certs/redis-ca.crt
+                insecureSkipVerify: false
+
+    # NEGATIVE: a client certificate without its key. The middleware is
+    # refused with
+    # 'invalid store.redis.tls configuration: both TLS cert and key must be defined'.
+    tls-cert-without-key:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              tls:
+                cert: /etc/traefik/certs/client.crt
+
+    # NEGATIVE: a cert/key pair that does not exist on disk. The material is
+    # validated when the middleware is created, not on the first request:
+    # 'invalid store.redis.tls configuration: cert file does not exist'.
+    tls-cert-file-missing:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              tls:
+                cert: /etc/traefik/certs/does-not-exist.crt
+                key: /etc/traefik/certs/does-not-exist.key

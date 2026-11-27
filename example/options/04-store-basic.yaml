@@ -1,0 +1,186 @@
+# 04-store-basic.yaml - `store.redis.endpoints`, `database`, `timeout`,
+# `poolSize`, `maxActiveConns`, `idleTimeout`
+#
+# The store section is lazy: the middleware is created (and the configuration
+# validated) at load time, the first request opens the connections. That is why
+# an endpoints list may contain a dead address - the failover happens on the
+# first real command.
+http:
+  middlewares:
+    # One endpoint, every store option at its default: database 0,
+    # timeout 2s, poolSize = maxActiveConns = 10 * GOMAXPROCS, idleTimeout 0
+    # (the master discovery is never suspended).
+    db-defaults:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # database: 0 explicit (same as the default).
+    db-zero:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              database: 0
+
+    # database: 3 - the buckets live in another keyspace, which is handy when
+    # the same Redis hosts several environments. Checked with `redis-cli -n 3`.
+    db-three:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              database: 3
+
+    # A list of endpoints is failover, not load balancing: the middleware talks
+    # to one endpoint at a time and moves to the next one when a node-level
+    # failure is detected - including an endpoint that cannot be dialed (a DNS
+    # failure like this one, a refused connection, a TLS handshake failure),
+    # because the failure is reported back to the provider before the retry. At
+    # most one move per second, which guards against flapping.
+    #
+    # The request that discovers the failure is retried on the next endpoint, so
+    # a dead-first list keeps working (verified by hack/options/run.sh: the
+    # requests are served and the bucket ends up on the healthy endpoint).
+    db-failover-endpoints:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints:
+                - redis-nowhere:6379
+                - redis:6379
+              timeout: 300ms
+
+    # The same list with `denyOnError: false`: if *every* endpoint is down, the
+    # request reaches the backend instead of being rejected, which is what an
+    # availability-first deployment wants. While one endpoint answers, the
+    # failover above means the limit keeps being enforced.
+    db-failover-endpoints-available:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          denyOnError: false
+          store:
+            redis:
+              endpoints:
+                - redis-nowhere:6379
+                - redis:6379
+              timeout: 300ms
+
+    # The recommended shape of a list: the healthy endpoint is first, the others
+    # are spare ones. The limit is enforced normally, and the spare endpoints are
+    # only reached after a node-level failure of the first one.
+    db-failover-healthy-first:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints:
+                - redis:6379
+                - redis-nowhere:6379
+              timeout: 300ms
+
+    # timeout: dial, read and write timeout. Below a millisecond the
+    # configuration is still valid, but the store will rarely answer.
+    db-timeout-500ms:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              timeout: 500ms
+
+    # A long timeout: useful for a slow network, at the price of a long wait
+    # when the store is down.
+    db-timeout-1m:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              timeout: 1m
+
+    # poolSize / maxActiveConns: omitted -> the idle pool follows the
+    # connection cap (10 * GOMAXPROCS), which is what a burst of concurrent
+    # requests needs (see docs/16-benchmark-p99.md).
+    db-pool-defaults:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # Explicit values: keep up to 32 idle connections and never open more than
+    # 64 at the same time.
+    db-pool-explicit:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              poolSize: 32
+              maxActiveConns: 64
+
+    # A deliberately small pool: one idle connection, at most two at a time.
+    # Valid, but under concurrency the connections are closed and re-dialed.
+    db-pool-small:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              poolSize: 1
+              maxActiveConns: 2
+
+    # idleTimeout: 0 (default) keeps the master discovery and the connections
+    # alive forever; a middleware that stops receiving traffic keeps its
+    # background work.
+    db-idle-zero:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              idleTimeout: "0"
+
+    # idleTimeout: 30s suspends the discovery and closes the idle connections
+    # after 30s without traffic; the next request starts them again. Handy for
+    # a middleware that is configured but rarely used.
+    db-idle-30s:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              idleTimeout: 30s
+

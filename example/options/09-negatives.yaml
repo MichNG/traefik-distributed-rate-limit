@@ -1,0 +1,246 @@
+# 09-negatives.yaml - configurations that MUST be refused
+#
+# None of these middlewares is expected to work: Traefik loads the file, tries
+# to build each middleware, and reports `status: disabled` with the error below
+# in /api/http/middlewares/<name>@file (and in the Traefik log). They are here
+# so that a typo is caught at load time instead of silently limiting the wrong
+# thing (or nothing at all).
+#
+# The stand in hack/options asserts every message below.
+http:
+  middlewares:
+    # `store.redis.endpoints` is mandatory.
+    # expect: store.redis.endpoints must not be empty
+    bad-empty-endpoints:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: []
+
+    # Redis Cluster is not supported yet and is refused explicitly instead of
+    # being ignored, whatever the shape of the section.
+    # expect: store.redis.cluster is not supported yet
+    bad-cluster:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              cluster:
+                enabled: true
+
+    # An empty mapping takes an extra hop: Traefik's plugin configuration
+    # decoding flattens `{}` to the empty string before the plugin sees it, so
+    # the field accepts any shape and the validation still answers with the
+    # documented message (a typed field would surface the decoder's own error
+    # instead).
+    # expect: store.redis.cluster is not supported yet
+    bad-cluster-empty-map:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              cluster: {}
+
+    # A claim cannot be read from nowhere: a cookie or a header must carry the
+    # token.
+    # expect: jwtClaim requires cookieName or requestHeaderName
+    bad-jwt-without-source:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            jwtClaim: sub
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # A JSON field needs the cookie that holds the JSON payload.
+    # expect: cookieField requires cookieName
+    bad-cookiefield-without-cookiename:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            cookieField: tenant
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # A bracket index must be a number: it can never resolve otherwise, so the
+    # configuration is refused instead of producing an empty source.
+    # expect: array index "x" is not a number
+    bad-nonnumeric-index:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            cookieName: session
+            cookieField: users[x].id
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # A negative pool size makes no sense (0 means "use the default").
+    # expect: store.redis.poolSize must be >= 0
+    bad-negative-pool:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              poolSize: -1
+
+    # A negative rate is a configuration mistake: 0 is the documented way to
+    # disable rate limiting.
+    # expect: limit must be >= 0
+    bad-negative-limit:
+      plugin:
+        distributedRateLimit:
+          limit: -1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # Not a duration parser input ("10 seconds").
+    # expect: invalid period "10 seconds"
+    bad-period:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: "10 seconds"
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # A zero period would divide by zero: refused.
+    # expect: period must be greater than 0
+    bad-zero-period:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: "0s"
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # Only shared, clientIP, deny and denyOnError are accepted.
+    # expect: invalid onEmptySource "explode"
+    bad-emptysource-policy:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            cookieName: session
+            onEmptySource: explode
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # requestHeaderName, requestHost and cookieName are mutually exclusive.
+    # expect: requestHeaderName, requestHost and cookieName are mutually exclusive
+    bad-two-criteria:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            requestHeaderName: X-Api-Key
+            cookieName: session
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # ipStrategy is a criterion on its own (or the fallback of
+    # onEmptySource=clientIP), not a companion of another criterion.
+    # expect: ipStrategy and the other source criteria are mutually exclusive
+    bad-ip-strategy-with-criterion:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            requestHeaderName: X-Api-Key
+            ipStrategy:
+              depth: 1
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # An unparsable timeout.
+    # expect: invalid store.redis.timeout "soon"
+    bad-timeout:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              timeout: soon
+
+    # A negative idle timeout (0 disables the idle stop).
+    # expect: store.redis.idleTimeout must be >= 0
+    bad-idle-timeout:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              idleTimeout: -5s
+
+    # An address that is not an address.
+    # expect: unable to create IP whitelist checker
+    bad-whitelist-entry:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          whitelistIPs:
+            - not-an-ip
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # An endpoint must be host:port.
+    # expect: invalid Redis endpoint "redis"
+    bad-endpoint-format:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis]
+              sentinel:
+                masterSet: mymaster
+
+    # Sentinel mode without the master set name cannot discover anything.
+    # expect: store.redis.sentinel.masterSet is required when store.redis.sentinel is used
+    bad-sentinel-without-masterset:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [sentinel-0:26379]
+              sentinel:
+                watch: true

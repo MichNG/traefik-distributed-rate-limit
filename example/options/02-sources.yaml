@@ -1,0 +1,317 @@
+# 02-sources.yaml - `sourceCriterion`: ipStrategy, requestHeaderName,
+# `requestHost`, `cookieName`, `cookieField`, `jwtClaim`, `onEmptySource`
+#
+# What groups requests into one bucket. Exactly one criterion may be set
+# (`requestHeaderName` / `requestHost` / `cookieName`); `ipStrategy` is either
+# the criterion itself, or - with `onEmptySource: clientIP` - the strategy used
+# for the fallback source.
+#
+# A fresh bucket holds `burst` tokens and refills `limit` per `period`: the
+# checks below use 1 request per 10s with a burst of 1 so that the *key* the
+# middleware writes to Redis is the interesting part (`rate:<middleware>@file:<source>`).
+http:
+  middlewares:
+    # --- ipStrategy --------------------------------------------------------
+    # No ipStrategy: the source is the client address of the connection
+    # (RemoteAddr). Behind a load balancer this is the balancer, not the user.
+    src-ip-default:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # depth: take the IP at the given position from the right of
+    # X-Forwarded-For (depth 1 = the client, when one proxy appended its own
+    # address). Requires a trusted X-Forwarded-For: configure
+    # forwardedHeaders.trustedIPs (or `insecure`) on the entry point.
+    src-ip-depth:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            ipStrategy:
+              depth: 1
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # excludedIPs: scan X-Forwarded-For and take the first address that is not
+    # in the list - the usual way to skip the hops of your own infrastructure.
+    src-ip-excluded:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            ipStrategy:
+              excludedIPs:
+                - 10.0.0.0/8
+                - 192.168.0.0/16
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # depth and excludedIPs together: `depth` wins (see IPStrategy.Get), the
+    # excludedIPs are then unused. Kept here to show the interaction.
+    src-ip-depth-excluded:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            ipStrategy:
+              depth: 1
+              excludedIPs:
+                - 10.0.0.0/8
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # --- requestHeaderName -------------------------------------------------
+    # A header, typically set by an upstream middleware (auth proxy, gateway).
+    src-header:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            requestHeaderName: X-Api-Key
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # --- requestHost -------------------------------------------------------
+    # The request host: limits a tenant by domain name.
+    src-host:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            requestHost: true
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # --- cookieName --------------------------------------------------------
+    # The whole cookie value, read by the plugin itself (no rewriting
+    # middleware): the recommended criterion when the identity lives in a
+    # cookie.
+    src-cookie-value:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            cookieName: _sm_user_id
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # --- cookieField -------------------------------------------------------
+    # A dot path inside a JSON cookie value. The cookie is percent-encoded in
+    # practice (a raw '"' is not valid in a Cookie header) and is decoded
+    # before parsing: session=%7B%22user%22%3A%7B%22id%22%3A%22u9%22%7D%7D.
+    src-cookie-field-dot:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            cookieName: session
+            cookieField: user.id
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # An array element by index, dot form: {"users":[{"id":"uA"}]} + users.0.id
+    src-cookie-array-dot:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            cookieName: _sm_session
+            cookieField: users.0.id
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # The same index, bracket form: users[0].id (both spellings are equivalent;
+    # nested indexes work too, e.g. m[1][0]).
+    src-cookie-array-bracket:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            cookieName: _sm_session
+            cookieField: users[0].id
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # A scalar field: {"tenant":42} + `tenant` -> the key "42". Numbers keep the
+    # exact text of the payload (a big id is not rounded through a float64),
+    # booleans read as true/false.
+    src-cookie-scalar-number:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            cookieName: session
+            cookieField: tenant
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # --- jwtClaim ----------------------------------------------------------
+    # A claim of a JWT held by the cookie. The signature is NOT verified: see
+    # "Security: JWT claims" in the README, the token must be validated
+    # upstream.
+    src-jwt-cookie:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            cookieName: _sm_token
+            jwtClaim: sub
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # The JWT is a JSON field of the cookie (cookieField first, then jwtClaim):
+    # session={"token":"<jwt>"}.
+    src-jwt-cookie-field:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            cookieName: session
+            cookieField: token
+            jwtClaim: sub
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # The JWT travels in a header: "Authorization: Bearer <jwt>". The Bearer
+    # prefix is optional and case-insensitive.
+    src-jwt-header-bearer:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            requestHeaderName: Authorization
+            jwtClaim: sub
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # The same header, with a raw token (no "Bearer " prefix). Dot paths and
+    # array indexes work in the claim too (sub, user.id, roles.0).
+    src-jwt-header-raw:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            requestHeaderName: X-Jwt
+            jwtClaim: user.id
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # --- onEmptySource -----------------------------------------------------
+    # shared (the default): every request without a usable source shares one
+    # bucket - the key ends with "@file:" (empty source).
+    src-empty-shared:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            cookieName: _sm_user_id
+            onEmptySource: shared
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # clientIP: no cookie -> limit per client IP instead of grouping everybody.
+    # ipStrategy here is the *fallback* strategy (depth 1 of X-Forwarded-For).
+    src-empty-clientip:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            cookieName: _sm_user_id
+            onEmptySource: clientIP
+            ipStrategy:
+              depth: 1
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # deny: 400 before touching the store - an unidentified client never
+    # consumes a shared bucket.
+    src-empty-deny:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            cookieName: _sm_user_id
+            onEmptySource: deny
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # denyOnError: handled like a store error -> 429 when denyOnError is true.
+    src-empty-denyonerror-true:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          denyOnError: true
+          sourceCriterion:
+            cookieName: _sm_user_id
+            onEmptySource: denyOnError
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # ... and the request reaches the backend when denyOnError is false.
+    src-empty-denyonerror-false:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          denyOnError: false
+          sourceCriterion:
+            cookieName: _sm_user_id
+            onEmptySource: denyOnError
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # onEmptySource with a header criterion: the same policy, an empty header.
+    src-empty-header-deny:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          sourceCriterion:
+            requestHeaderName: X-Api-Key
+            onEmptySource: deny
+          store:
+            redis:
+              endpoints: [redis:6379]
+

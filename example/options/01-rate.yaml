@@ -1,0 +1,173 @@
+# 01-rate.yaml - `limit`, `period`, `burst`, `denyOnError`, `responseHeaders`
+#
+# Every variant of the rate options, one middleware each. The file is loaded by
+# a file provider pointing at this directory (see docker-compose.options.yaml),
+# so every name below is a middleware of the `options` provider:
+# `rate-...@file`.
+#
+# Useful relations:
+#   * a fresh bucket holds `burst` tokens, refills `limit` tokens per `period`,
+#     so a fresh `limit: 5, burst: 10` passes 10 requests and the 11th is 429;
+#   * `limit: 0` disables rate limiting completely: the store is never called;
+#   * `burst` defaults to 1, `period` to 1s, `denyOnError` to true,
+#     `responseHeaders` to false.
+http:
+  middlewares:
+    # --- limit -------------------------------------------------------------
+    # All defaults: limit 0 (no rate limiting), period 1s, burst 1,
+    # denyOnError true, no headers.
+    rate-defaults:
+      plugin:
+        distributedRateLimit:
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # limit: 0 -> rate limiting is off, whatever `period`/`burst` say.
+    # Expected: every request reaches the backend, no Redis call at all.
+    rate-zero-limit:
+      plugin:
+        distributedRateLimit:
+          limit: 0
+          period: 1s
+          burst: 100
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # A plain limit, expressed with `period`.
+    rate-limit-100:
+      plugin:
+        distributedRateLimit:
+          limit: 100
+          period: 1s
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # --- period ------------------------------------------------------------
+    # Sub-second period: 1 request per 500ms.
+    rate-period-500ms:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 500ms
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # A long period: 60 requests per minute (the same rate as 1/s, but the
+    # bucket refills in one step per minute).
+    rate-period-1m:
+      plugin:
+        distributedRateLimit:
+          limit: 60
+          period: 1m
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # Legacy spelling: a bare integer is a number of seconds (here 5s). The
+    # README documents "1s"/"1m"; the integer form is accepted for the
+    # historical configuration.
+    rate-period-whole-seconds:
+      plugin:
+        distributedRateLimit:
+          limit: 5
+          period: "5"
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # --- burst -------------------------------------------------------------
+    # `burst` omitted: it defaults to 1 (one request at a time).
+    rate-burst-default:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 1s
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # `burst` set explicitly: a small allowance for a spike.
+    rate-burst-explicit:
+      plugin:
+        distributedRateLimit:
+          limit: 2
+          period: 1s
+          burst: 10
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # limit + burst together: a steady 5/10s with a burst of 10 - the shape
+    # used by the behavioural checks and by the X-RateLimit-* headers.
+    rate-limit-burst-combo:
+      plugin:
+        distributedRateLimit:
+          limit: 5
+          period: 10s
+          burst: 10
+          responseHeaders: true
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # --- denyOnError -------------------------------------------------------
+    # denyOnError: true (and the default): a store that cannot answer yields
+    # 429 instead of an unlimited pass-through.
+    # The endpoint below does not resolve on purpose: the middleware is created
+    # (the store is lazy) and every request is 429.
+    rate-deny-on-error-true:
+      plugin:
+        distributedRateLimit:
+          limit: 5
+          period: 1s
+          burst: 5
+          denyOnError: true
+          store:
+            redis:
+              endpoints: [redis-nowhere:6379]
+              timeout: 200ms
+
+    # denyOnError: false: the same broken store, but availability wins - the
+    # request reaches the backend (200) and the limiter is silently bypassed
+    # for as long as the store is down.
+    rate-deny-on-error-false:
+      plugin:
+        distributedRateLimit:
+          limit: 5
+          period: 1s
+          burst: 5
+          denyOnError: false
+          store:
+            redis:
+              endpoints: [redis-nowhere:6379]
+              timeout: 200ms
+
+    # --- responseHeaders ---------------------------------------------------
+    # responseHeaders: true -> X-RateLimit-Limit/Period/Remaining/Reset.
+    rate-headers-true:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 1s
+          burst: 1
+          responseHeaders: true
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # responseHeaders: false (default) -> the 429 carries no X-RateLimit-*.
+    rate-headers-false:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 1s
+          burst: 1
+          responseHeaders: false
+          store:
+            redis:
+              endpoints: [redis:6379]
+

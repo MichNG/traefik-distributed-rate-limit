@@ -1,0 +1,64 @@
+# 08-breaker.yaml - `store.redis.breaker.threshold` / `.reattempt`
+#
+# The circuit breaker protects Traefik from a store that keeps failing: after
+# `threshold` consecutive failures the breaker opens for `reattempt` seconds,
+# and every request during that window is decided by `denyOnError` (429 when it
+# is true, pass-through when it is false) without touching Redis again.
+http:
+  middlewares:
+    # Defaults: threshold 3, reattempt 15s. Stated by omission here - the same
+    # middleware is also written out explicitly below, and both are equivalent.
+    brk-default:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # Explicit defaults.
+    brk-explicit-defaults:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              breaker:
+                threshold: 3
+                reattempt: 15
+
+    # A stricter breaker: one failure is enough to stop hammering the store,
+    # and it retries after 30s.
+    brk-strict:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          store:
+            redis:
+              endpoints: [redis:6379]
+              breaker:
+                threshold: 5
+                reattempt: 30
+
+    # Extreme values: open on the very first failure, retry after one second.
+    # With an unreachable store, the first request is 429 (denyOnError) and the
+    # next ones are answered from the open breaker.
+    brk-extreme:
+      plugin:
+        distributedRateLimit:
+          limit: 5
+          period: 1s
+          burst: 5
+          denyOnError: true
+          store:
+            redis:
+              endpoints: [redis-nowhere:6379]
+              timeout: 200ms
+              breaker:
+                threshold: 1
+                reattempt: 1
+

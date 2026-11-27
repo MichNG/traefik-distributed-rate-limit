@@ -1,0 +1,39 @@
+# traefik-options.yaml
+#
+# Static configuration used by docker-compose.options.yaml: every file of
+# example/options/ is loaded as a dynamic configuration by the file provider
+# (the directory mode), and the plugin is mounted as a local plugin.
+#
+# `log.level: DEBUG` matters here: a Yaegi plugin writes its informational
+# messages to the interpreted stdout, which Traefik reports at debug level.
+# Without DEBUG the deprecation warnings of 07-legacy.yaml would not show up.
+#
+# The directory must contain dynamic configurations only (routers, middlewares,
+# services) - this file lives outside it on purpose.
+
+entryPoints:
+  web:
+    address: ":8000"
+    forwardedHeaders:
+      # The stand drives X-Forwarded-For by hand, and the ipStrategy examples
+      # (depth, excludedIPs) plus the whitelist examples read it. Traefik ignores
+      # that header coming from an untrusted peer by default; production should
+      # use trustedIPs instead of insecure (development only).
+      insecure: true
+
+providers:
+  file:
+    directory: "/etc/traefik/options"
+
+api:
+  dashboard: true
+  insecure: true  # development only
+
+log:
+  level: DEBUG
+  format: common
+
+experimental:
+  localPlugins:
+    distributedRateLimit:
+      moduleName: github.com/MichNG/traefik-distributed-rate-limit

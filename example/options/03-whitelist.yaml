@@ -1,0 +1,58 @@
+# 03-whitelist.yaml - `whitelistIPs`
+#
+# Addresses or CIDR ranges that bypass rate limiting entirely: the middleware
+# returns the request to the next handler without calling Redis at all (so no
+# bucket key is created). The address is resolved with `sourceCriterion.ipStrategy`
+# (or the connection address when it is not set), so a whitelist behind a proxy
+# needs the same `ipStrategy` treatment as the source criterion.
+http:
+  middlewares:
+    # A single address.
+    wl-single-ip:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          responseHeaders: true
+          whitelistIPs:
+            - 203.0.113.7
+          sourceCriterion:
+            ipStrategy:
+              depth: 1
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # A CIDR range.
+    wl-cidr:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          whitelistIPs:
+            - 10.0.0.0/8
+          sourceCriterion:
+            ipStrategy:
+              depth: 1
+          store:
+            redis:
+              endpoints: [redis:6379]
+
+    # Several entries: addresses and ranges mixed.
+    wl-multiple:
+      plugin:
+        distributedRateLimit:
+          limit: 1
+          period: 10s
+          whitelistIPs:
+            - 203.0.113.7
+            - 198.51.100.0/24
+            - 2001:db8::1
+            - 10.0.0.0/8
+          sourceCriterion:
+            ipStrategy:
+              depth: 1
+          store:
+            redis:
+              endpoints: [redis:6379]
+
