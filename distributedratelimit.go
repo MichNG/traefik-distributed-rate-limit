@@ -103,7 +103,12 @@ type RedisStoreConfig struct {
 	IdleTimeout string `json:"idleTimeout,omitempty" toml:"idleTimeout,omitempty" yaml:"idleTimeout,omitempty" mapstructure:"idleTimeout"`
 	// Cluster enables Redis Cluster. Not supported yet: configuring it fails
 	// the middleware creation with an explicit message.
-	Cluster *struct{} `json:"cluster,omitempty" toml:"cluster,omitempty" yaml:"cluster,omitempty" mapstructure:"cluster"`
+	//
+	// The type is deliberately open: Traefik's plugin loader flattens an empty
+	// mapping to the empty string before the plugin sees it, so a typed target
+	// (`*struct{}`) would turn `cluster: {}` into the loader's own decoding
+	// error instead of the explicit message promised by the documentation.
+	Cluster any `json:"cluster,omitempty" toml:"cluster,omitempty" yaml:"cluster,omitempty" mapstructure:"cluster"`
 	// Sentinel enables Redis Sentinel mode.
 	Sentinel *SentinelStoreConfig `json:"sentinel,omitempty" toml:"sentinel,omitempty" yaml:"sentinel,omitempty" mapstructure:"sentinel"`
 	// TLS secures the connections to Redis (and to the Sentinels).
@@ -210,7 +215,7 @@ func newRateLimit(ctx context.Context, next http.Handler, config *Config, name s
 		return nil, err
 	}
 	for _, warning := range warnings {
-		logger.warnf("%s", warning)
+		logger.warnMessage(warning)
 	}
 
 	if err := config.validate(); err != nil {

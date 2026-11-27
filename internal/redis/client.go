@@ -404,6 +404,13 @@ func (c *Client) DoRaw(ctx context.Context, args ...string) (respValue, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		pc, err := c.get(ctx)
 		if err != nil {
+			// A refused or unresolvable endpoint is a topology hint as well:
+			// without telling the provider, a static list keeps hitting the dead
+			// endpoint on every request (a Sentinel resolution instead refreshes
+			// the master). Pool saturation and a closed client are not.
+			if c.provider.Failure(err) && attempt == 0 {
+				continue
+			}
 			return respValue{}, err
 		}
 

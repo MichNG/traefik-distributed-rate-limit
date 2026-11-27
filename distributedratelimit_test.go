@@ -1327,3 +1327,67 @@ func TestOnEmptySourceDenyOnErrorWithCookie(t *testing.T) {
 		})
 	}
 }
+
+// A middleware with several deprecated keys must report every one of them. The
+// logger throttles repeated messages; the deprecation warnings share the "%s"
+// template, so throttling on the template (instead of on the rendered message)
+// used to keep only the first one.
+func TestEveryDeprecationWarningIsLogged(t *testing.T) {
+	stdout := captureStdout(t)
+
+	cfg := decode(t, `{
+		"average": 5,
+		"redisAddress": "redis:6379",
+		"redisDb": 2,
+		"redisPassword": "legacy-secret",
+		"redisConnectionTimeout": 2,
+		"breakerThreshold": 7,
+		"breakerReattempt": 9
+	}`)
+
+	// newRateLimit is the path Traefik takes: the configuration is normalized
+	// (and the warnings are logged) exactly once, inside the constructor.
+	next := http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) { rw.WriteHeader(http.StatusOK) })
+	if _, err := newRateLimit(context.Background(), next, cfg, "test", nil); err != nil {
+		t.Fatalf("newRateLimit: %v", err)
+	}
+
+	logged := stdout()
+	for _, want := range []string{
+		`"average" is deprecated, use "limit" instead`,
+		`"redisAddress" is deprecated, use "store.redis.endpoints" instead`,
+		`"redisDb" is deprecated, use "store.redis.database" instead`,
+		`"redisPassword" is deprecated, use "store.redis.password" instead`,
+		`"redisConnectionTimeout" is deprecated, use "store.redis.timeout" instead`,
+		`"breakerThreshold"/"breakerReattempt" are deprecated`,
+	} {
+		if !strings.Contains(logged, want) {
+			t.Errorf("warning %q not logged; got:\n%s", want, logged)
+		}
+	}
+}
+
+// The cluster section is refused with the documented message whatever its shape:
+// Traefik's plugin loader flattens an empty mapping to the empty string before
+// the plugin sees it, so the field accepts any shape and the validation is what
+// answers.
+func TestClusterIsRejectedInEveryShape(t *testing.T) {
+	for name, raw := range map[string]string{
+		"non-empty mapping": `{"limit": 1, "store": {"redis": {"endpoints": ["redis:6379"], "cluster": {"enabled": true}}}}`,
+		"empty mapping":     `{"limit": 1, "store": {"redis": {"endpoints": ["redis:6379"], "cluster": {}}}}`,
+		"flattened mapping": `{"limit": 1, "store": {"redis": {"endpoints": ["redis:6379"], "cluster": ""}}}`,
+		"true":              `{"limit": 1, "store": {"redis": {"endpoints": ["redis:6379"], "cluster": true}}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := decode(t, raw)
+			if _, err := cfg.normalize(); err != nil {
+				t.Fatalf("normalize: %v", err)
+			}
+
+			err := cfg.validate()
+			if err == nil || !strings.Contains(err.Error(), "store.redis.cluster is not supported yet") {
+				t.Fatalf("validate = %v, want the explicit store.redis.cluster message", err)
+			}
+		})
+	}
+}

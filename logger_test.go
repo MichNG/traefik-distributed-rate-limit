@@ -86,3 +86,30 @@ func captureStdout(t *testing.T) func() string {
 		return string(out)
 	}
 }
+
+// Distinct messages that share one template (the deprecation warnings are all
+// logged through "%s") must not be collapsed by the throttle, while a repeat of
+// the very same message stays throttled. warnf keeps throttling per template:
+// that is what a store outage needs.
+func TestLoggerThrottlesPerMessage(t *testing.T) {
+	stdout := captureStdout(t)
+
+	logger := newPluginLogger("my-middleware")
+
+	logger.warnMessage(`"average" is deprecated, use "limit" instead`)
+	logger.warnMessage(`"redisDb" is deprecated, use "store.redis.database" instead`)
+	logger.warnMessage(`"average" is deprecated, use "limit" instead`) // identical: throttled
+	logger.warnf("%s", "first distinct template message")
+	logger.warnf("%s", "second one, same template") // throttled by template
+
+	out := stdout()
+	if got := strings.Count(out, "is deprecated"); got != 2 {
+		t.Errorf("distinct messages sharing a template: got %d lines, want 2:\n%s", got, out)
+	}
+	if !strings.Contains(out, "first distinct template message") {
+		t.Errorf("warnf message not logged: %s", out)
+	}
+	if strings.Contains(out, "second one, same template") {
+		t.Errorf("warnf must still throttle by template: %s", out)
+	}
+}

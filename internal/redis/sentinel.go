@@ -555,14 +555,27 @@ func parseSwitchMaster(payload string) (masterSet string, addr string, ok bool) 
 }
 
 // IsMasterFailoverError reports whether err reveals that the node we talk to is
-// not (or is no longer) the master: a demoted master answers READONLY, a
-// failing or restarting one answers MASTERDOWN or LOADING.
+// unusable: a demoted master answers READONLY, a failing or restarting one
+// answers MASTERDOWN or LOADING, and an endpoint that cannot be reached at all
+// (refused, reset, DNS, dial timeout) is worth rotating away from as well.
+//
+// The check is wrapper-aware: the dial and command errors reach this function
+// wrapped ("dialing redis:6379: %w"), so a plain type assertion would miss
+// every network error and the endpoint list would never rotate.
 func IsMasterFailoverError(err error) bool {
 	if err == nil {
 		return false
 	}
 
-	if netErr, ok := err.(net.Error); ok && netErr != nil {
+	// A saturated pool and a cancelled request both surface as context
+	// deadlines: they say nothing about the node, so they must not move the
+	// endpoint list.
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return false
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) {
 		return true
 	}
 	if _, ok := err.(*net.OpError); ok {
@@ -574,6 +587,7 @@ func IsMasterFailoverError(err error) bool {
 		"READONLY", "MASTERDOWN", "LOADING",
 		"CONNECTION RESET", "CONNECTION REFUSED", "CONNECTION CLOSED",
 		"I/O TIMEOUT", "BROKEN PIPE", "EOF",
+		"NO SUCH HOST", "NAME RESOLUTION", "NETWORK IS UNREACHABLE",
 	} {
 		if strings.Contains(msg, marker) {
 			return true

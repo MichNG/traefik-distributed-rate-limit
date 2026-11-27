@@ -50,8 +50,20 @@ func (l *pluginLogger) Logf(format string, args ...interface{}) {
 // warnf logs an informational message (throttled). It lands in the Traefik log
 // at debug level, which is the right place for configuration and topology
 // messages: `log.level: DEBUG` is required to see them.
+//
+// The throttle key is the format, which is what an outage needs (the node of a
+// store error varies, the template does not). Messages that are all rendered
+// through the same template - the deprecation warnings, logged with "%s" - must
+// use warnMessage instead, or every warning but the first would be dropped.
 func (l *pluginLogger) warnf(format string, args ...interface{}) {
 	l.write(infoLevel, format, args...)
+}
+
+// warnMessage logs an already rendered message, throttled by the message
+// itself, so that distinct messages sharing one template are all reported while
+// a repetition of the same one stays throttled.
+func (l *pluginLogger) warnMessage(msg string) {
+	l.writeKeyed(infoLevel, msg, msg)
 }
 
 // errorf logs an error (throttled). It lands in the Traefik log at error level.
@@ -65,14 +77,17 @@ const (
 )
 
 func (l *pluginLogger) write(level, format string, args ...interface{}) {
-	msg := fmt.Sprintf(format, args...)
+	l.writeKeyed(level, format, fmt.Sprintf(format, args...))
+}
 
+// writeKeyed throttles on key and writes msg at the given level.
+func (l *pluginLogger) writeKeyed(level, key, msg string) {
 	l.mu.Lock()
-	if last, ok := l.lastAt[format]; ok && time.Since(last) < logThrottleInterval {
+	if last, ok := l.lastAt[key]; ok && time.Since(last) < logThrottleInterval {
 		l.mu.Unlock()
 		return
 	}
-	l.lastAt[format] = time.Now()
+	l.lastAt[key] = time.Now()
 	l.mu.Unlock()
 
 	line := l.prefix + level + " " + msg
