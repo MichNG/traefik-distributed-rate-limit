@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.2.0
+
+### Added
+
+* `example/options/`: one example per option of the README, with all its
+  variants (rate, sources, whitelist, store basics, credentials, TLS, legacy
+  keys, breaker, negative configurations, routers), loaded by a real Traefik:
+  `make integration-options` (`hack/options/run.sh`, `docs/18-options.md`);
+* a coverage test per option row (`TestOptionsCoverage` walks the README table and
+  fails when a row has no check) together with the missing deep tests: the
+  `SELECT` and `AUTH` seen on the wire, the command and dial timeouts, the
+  sentinel password from the environment, `ipStrategy.excludedIPs`, the four
+  `X-RateLimit-*` headers on denial, the `period` variants and its errors, the
+  `burst` normalization, the `whitelistIPs` variants, `onEmptySource` policies,
+  and TLS on the Sentinel connections.
+
+### Fixed
+
+* a dial failure (an endpoint that refuses connections, a name that does not
+  resolve) now rotates `store.redis.endpoints` and the request is retried on the
+  next endpoint: before, the same dead endpoint was selected forever and, with the
+  default `denyOnError: true`, every request was a `429`;
+* `IsMasterFailoverError` classifies wrapped network errors (it used a plain type
+  assertion, so `"dialing redis:6379: %w"` was never recognised), and it no longer
+  treats the context deadline of a saturated pool or of a cancelled request as a
+  node failure;
+* every deprecation warning of a middleware reaches the log: they share the `%s`
+  template and the logger throttled on the template, so only the first one was
+  reported. Throttling now uses the rendered message (a repeated identical
+  warning is still dropped);
+* `store.redis.cluster` is refused with the documented message in every shape:
+  Traefik's loader flattens an empty mapping to the empty string, which used to
+  surface the decoder's own error instead.
+
+### Changed
+
+* the README documents the option nuances the audit turned up: `period` is
+  normalized to the Go duration form (`1m` → `1m0s`), `0` means "not set" for
+  `poolSize`/`maxActiveConns`, `username` and `password` are a pair, and `$ENV_VAR`
+  expansion applies to the credentials.
+
 ## 1.1.0
 
 ### Added

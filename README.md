@@ -26,7 +26,7 @@ experimental:
   plugins:
     distributedRateLimit:
       moduleName: "github.com/MichNG/traefik-distributed-rate-limit"
-      version: "v1.1.0"
+      version: "v1.2.0"
 ```
 
 > **Versioning.** The module path carries no `/v2` suffix, so the Go module rules
@@ -123,6 +123,21 @@ http:
 | `sourceCriterion.ipStrategy.excludedIPs` | First `X-Forwarded-For` IP not in the list is the client IP. | — |
 | `whitelistIPs` | **Extension**: IPs or CIDR ranges that bypass rate limiting entirely. | — |
 | `store.redis.breaker.threshold` / `.reattempt` | **Extension**: consecutive store failures opening the circuit breaker, and the reattempt delay (seconds). | `3` / `15s` |
+
+### Notes on the options
+
+* `period` is normalized to the Go duration form: `1m` becomes `1m0s` (that is
+  what `X-RateLimit-Period` and the internal rate use), and a plain integer is
+  read as seconds (legacy). `burst` below `1` is raised to `1`.
+* `0` means "not set" for `poolSize` and `maxActiveConns`: both are then derived
+  from `GOMAXPROCS` by the client (see the table), not treated as a zero limit.
+* `username` and `password` are a pair: with a `username` and an empty password
+  the plugin sends `AUTH <username> ""`, which an ACL user without a password
+  accepts and a password-protected one refuses (`WRONGPASS`). A `password`
+  without a `username` authenticates as the `default` user.
+* `$ENV_VAR` is expanded for `store.redis.password` and
+  `store.redis.sentinel.password` (a missing variable leaves the literal value
+  and logs a warning). Credentials, not the other fields, are expanded.
 
 ### Redis Sentinel
 
