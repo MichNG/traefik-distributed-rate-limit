@@ -68,7 +68,7 @@ are also collected when the stand fails.
 
 | Option | Variants | Example | Verified by |
 | :--- | :--- | :--- | :--- |
-| `store.redis.endpoints` | one endpoint, a list (dead first, healthy first) | `04-store-basic.yaml`: `db-defaults`, `db-failover-endpoints`, `db-failover-endpoints-available`, `db-failover-healthy-first` | bucket key present; the dead-first list is `429` (finding 4), the healthy-first list is served |
+| `store.redis.endpoints` | one endpoint, a list (dead first, healthy first) | `04-store-basic.yaml`: `db-defaults`, `db-failover-endpoints`, `db-failover-endpoints-available`, `db-failover-healthy-first` | bucket key present; the dead-first list is served by the healthy endpoint (the request is retried there), the healthy-first list is served directly |
 | `store.redis.username` | with `password` | `05-store-auth.yaml`: `auth-user-pass` (`app`/`apppass`) | the request is served and the key appears |
 | `store.redis.password` | alone (ACL `default` user), and as `$ENV_VAR` | `auth-password-only`, `auth-env-var`, `auth-env-unset`, and the whole `07-legacy.yaml` | request served; the unset variable is reported in the log |
 | `store.redis.database` | omitted, `0`, `3` | `04-store-basic.yaml`: `db-defaults`, `db-zero`, `db-three` | the bucket of `db-three` is in database 3 and not in database 0 |
@@ -115,7 +115,7 @@ are also collected when the stand fails.
 `legacy-minimal` and `legacy-timeout-only` use a subset, and
 `legacy-new-keys-win` shows that the new `store.redis.*` keys win over the legacy
 ones of the same middleware (with the "ignored because …" warning). Warning
-messages: see finding 3.
+messages: see finding 3 (fixed: they are all logged now).
 
 ### Negative configurations
 
@@ -126,7 +126,7 @@ configurations that must be refused, each with the message the stand asserts:
 | :--- | :--- |
 | `bad-empty-endpoints` | `store.redis.endpoints must not be empty` |
 | `bad-cluster` | `store.redis.cluster is not supported yet: use store.redis.sentinel or a single Redis instance` |
-| `bad-cluster-empty-map` | `'store.redis.cluster' expected a map, got 'string'` (finding 2) |
+| `bad-cluster-empty-map` | `store.redis.cluster is not supported yet` (finding 2, fixed: the loader flattens `{}` to `""` and the field accepts it) |
 | `bad-jwt-without-source` | `jwtClaim requires cookieName or requestHeaderName` |
 | `bad-cookiefield-without-cookiename` | `cookieField requires cookieName` |
 | `bad-nonnumeric-index` | `invalid cookieField "users[x].id": array index "x" is not a number` |
