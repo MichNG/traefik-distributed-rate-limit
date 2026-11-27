@@ -1,0 +1,39 @@
+# e2e benchmark stand: one Traefik instance in front of traefik/whoami, with the
+# distributedRateLimit plugin (mounted as a local plugin) and a Redis that is
+# deliberately NOT published on the host: it must be reachable through the
+# compose network only.
+#
+# Started by hack/bench/run.sh, which exports BENCH_CONF_DIR (the static and
+# dynamic configuration) and BENCH_PLUGIN_DIR (this repository).
+name: drl-bench-single
+
+services:
+  redis:
+    image: redis:7
+    command: ["redis-server", "--save", ""]
+
+  reverse-proxy:
+    image: traefik:v3.5
+    command:
+      - --providers.file.filename=/etc/traefik/dynamic.yaml
+      - --api.insecure=true
+      - --log.level=INFO
+    ports:
+      - "18000:8000"
+      - "18080:8080"
+    volumes:
+      - ${BENCH_CONF_DIR:?BENCH_CONF_DIR is not set}/traefik.yaml:/etc/traefik/traefik.yaml:ro
+      - ${BENCH_CONF_DIR:?BENCH_CONF_DIR is not set}/dynamic.yaml:/etc/traefik/dynamic.yaml:ro
+      - ${BENCH_PLUGIN_DIR:?BENCH_PLUGIN_DIR is not set}:/plugins-local/src/github.com/MichNG/traefik-distributed-rate-limit/:ro
+
+  target:
+    image: traefik/whoami
+
+  loadgen:
+    # The load generator runs inside the compose network (see hack/bench/run.sh);
+    # the traefik image is already pulled for the stand, so this adds no image.
+    image: traefik:v3.5
+    entrypoint: ["/loadgen"]
+    volumes:
+      - ${BENCH_BIN_DIR:?BENCH_BIN_DIR is not set}/loadgen-linux:/loadgen:ro
+    profiles: ["tools"]
