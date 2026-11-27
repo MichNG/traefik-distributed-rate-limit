@@ -1,0 +1,113 @@
+name: Nightly
+
+# The nightly pipeline is the slow half of the CI: the stands below start real
+# Traefik + Redis containers and the chaos job promotes a Redis replica while
+# traffic is running. The push/pull pipelines stay fast and hermetic.
+#
+# Everything runs non-interactively, every check ends with a non-zero exit code,
+# and the stand logs are uploaded when a job fails.
+on:
+  schedule:
+    # 00:27 UTC = 03:27 MSK. Off the hour on purpose: GitHub queues the :00 runs.
+    - cron: '27 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # The stand logs are collected here (see hack/ci/lib.sh) and uploaded on failure.
+  ARTIFACTS_DIR: ${{ github.workspace }}/artifacts
+
+jobs:
+  unit:
+    name: unit (race) + yaegi
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache: true
+
+      - name: tests (race)
+        run: go test -race ./...
+
+      # Loads the plugin with the same Yaegi interpreter Traefik uses.
+      - name: yaegi compatibility check
+        run: make yaegi-check
+
+  integration:
+    name: integration (single, cookie, acl)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      # Host ports are not the default ones: the stands of the three steps (and
+      # any parallel run) never fight over 6379/8000/8080.
+      HTTP_PORT: 28100
+      API_PORT: 28180
+      REDIS_PORT: 16391
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: single Redis (limit, headers, shared state)
+        run: hack/ci/integration-single.sh
+
+      # The steps below run even if an earlier stand failed, so that one job
+      # gives the full picture; the job still fails at the end.
+      - name: cookie and header sources
+        if: ${{ !cancelled() }}
+        run: hack/ci/integration-cookie.sh
+        env:
+          HTTP_PORT: 28200
+          API_PORT: 28280
+          REDIS_PORT: 16392
+
+      - name: ACL credential pairs (data plane vs sentinel)
+        if: ${{ !cancelled() }}
+        run: hack/ci/integration-acl.sh
+        env:
+          HTTP_PORT: 28300
+          API_PORT: 28380
+          REDIS_PORT: 16393
+          SENTINEL_PORT: 26393
+
+      - name: upload the stand logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-integration-logs
+          path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  chaos:
+    name: chaos (sentinel failover under load)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      HTTP_PORT: 28400
+      API_PORT: 28480
+      REDIS_PORT: 16394
+      SENTINEL_PORT: 26394
+    steps:
+      - uses: actions/checkout@v4
+
+      # Promotes a replica under load and requires zero 5xx on the data path.
+      - name: sentinel failover while serving traffic
+        run: hack/ci/chaos-sentinel.sh
+
+      - name: upload the stand logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-chaos-logs
+          path: artifacts/
+          if-no-files-found: ignore
+          retention-days: 14

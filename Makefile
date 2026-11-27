@@ -1,4 +1,4 @@
-.PHONY: test test-race cover lint yaegi-check integration integration-sentinel integration-cookie integration-acl
+.PHONY: test test-race cover lint yaegi-check integration integration-sentinel integration-cookie integration-acl integration-nightly chaos bench bench-e2e
 
 # Runs gofmt, go vet and the whole test suite. The Go caches are kept inside
 # the repository so that the target also works in restricted environments.
@@ -29,3 +29,23 @@ integration-cookie:
 # Redis Sentinel behind an ACL user, with separate Sentinel credentials.
 integration-acl:
 	@docker compose -f docker-compose.acl.yaml up -d
+
+# The docker stands the nightly workflow runs (same scripts, non-default host
+# ports, every script brings its own stand up and down).
+integration-nightly:
+	@./hack/ci/integration-single.sh
+	@./hack/ci/integration-cookie.sh
+	@./hack/ci/integration-acl.sh
+
+# Redis Sentinel failover under load: the data path must see zero 5xx.
+chaos:
+	@./hack/ci/chaos-sentinel.sh
+
+# In-process benchmarks of the middleware (a fake RESP store, no docker).
+bench:
+	@./run-tests.sh -run '^$$' -bench . -benchmem
+
+# End-to-end benchmark: real Traefik and Redis containers, client-side RPS and
+# p50/p95/p99. Knobs: BENCH_WORKERS, BENCH_DURATION, BENCH_WARMUP, BENCH_KEEP.
+bench-e2e:
+	@./hack/bench/run.sh

@@ -6,3 +6,5 @@
 coverage.txt
 cover.html
 .DS_Store
+# Nightly CI stand logs (hack/ci writes them; uploaded as artifacts)
+artifacts/
