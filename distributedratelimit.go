@@ -90,7 +90,9 @@ type RedisStoreConfig struct {
 	Password  string   `json:"password,omitempty" toml:"password,omitempty" yaml:"password,omitempty" mapstructure:"password"`
 	Database  int      `json:"database,omitempty" toml:"database,omitempty" yaml:"database,omitempty" mapstructure:"database"`
 	Timeout   string   `json:"timeout,omitempty" toml:"timeout,omitempty" yaml:"timeout,omitempty" mapstructure:"timeout"`
-	// PoolSize is the maximum number of idle connections kept per node.
+	// PoolSize is the maximum number of idle connections kept per node. It
+	// defaults to maxActiveConns, so that a burst of concurrent requests does
+	// not close and re-dial connections (which churns ephemeral ports).
 	PoolSize int `json:"poolSize,omitempty" toml:"poolSize,omitempty" yaml:"poolSize,omitempty" mapstructure:"poolSize"`
 	// MaxActiveConns is the maximum number of connections opened at the same
 	// time, in use or idle. It defaults to 10 * GOMAXPROCS.

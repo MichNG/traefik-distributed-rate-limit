@@ -52,11 +52,16 @@ func (c ClientConfig) withDefaults() ClientConfig {
 	if c.CommandTimeout <= 0 {
 		c.CommandTimeout = 3 * time.Second
 	}
-	if c.PoolSize <= 0 {
-		c.PoolSize = 5
-	}
 	if c.MaxActiveConns <= 0 {
 		c.MaxActiveConns = 10 * runtime.GOMAXPROCS(0)
+	}
+	if c.PoolSize <= 0 {
+		// Keep the whole connection cap usable as idle capacity: with a smaller
+		// idle pool every connection above it is closed on release and dialed
+		// again by the next request, which churns through the ephemeral ports
+		// under concurrency, opens the breaker and turns allow into 429
+		// (measured with the previous default of 5, see docs/16-benchmark-p99.md).
+		c.PoolSize = c.MaxActiveConns
 	}
 	if c.MaxActiveConns < c.PoolSize {
 		// The idle pool cannot exceed the total number of connections.
