@@ -6,6 +6,7 @@ package redis
 
 import (
 	"context"
+	"errors"
 	"net"
 	"runtime"
 	"testing"
@@ -75,9 +76,18 @@ func TestWatcherStartsLazilyAndIsReleasedWithTheContext(t *testing.T) {
 
 	waitFor(t, 3*time.Second, func() bool { return !provider.Watching() }, "the watcher was not stopped after the context cancellation")
 
-	err := client.Ping(context.Background())
-	if err == nil {
-		t.Fatal("expected the retired client to refuse requests")
+	// The release runs in its own goroutine, so poll for the refusal instead of
+	// asserting it once: the instance must stop accepting work by the time the
+	// watcher is gone (Close marks the client closed before it stops the
+	// provider), and a poll keeps the test free of that scheduling race.
+	var lastErr error
+	waitFor(t, 3*time.Second, func() bool {
+		lastErr = client.Ping(context.Background())
+		return lastErr != nil
+	}, "the retired client did not refuse requests")
+
+	if !errors.Is(lastErr, ErrClosed) {
+		t.Fatalf("Ping on the retired client = %v, want ErrClosed", lastErr)
 	}
 
 	waitFor(t, 5*time.Second, func() bool {

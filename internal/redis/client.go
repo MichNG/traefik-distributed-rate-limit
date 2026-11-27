@@ -185,14 +185,18 @@ const drainPollInterval = 25 * time.Millisecond
 // connections are closed when they are returned to the pool. It is idempotent.
 func (c *Client) Close() {
 	c.stopIdleTimer()
-	c.provider.Stop()
 
+	// Refuse new work before tearing the provider down: a request that arrives
+	// while the provider is stopping must not open a connection that nothing
+	// will ever close (and the retired instance must not serve traffic anymore).
 	c.mu.Lock()
 	alreadyClosed := c.closed
 	c.closed = true
 	idle := c.idle
 	c.idle = nil
 	c.mu.Unlock()
+
+	c.provider.Stop()
 
 	if alreadyClosed {
 		return
